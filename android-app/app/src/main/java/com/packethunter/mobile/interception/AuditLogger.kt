@@ -5,7 +5,9 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileWriter
+import java.io.FileOutputStream
+import java.io.OutputStreamWriter
+import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -81,16 +83,49 @@ class AuditLogger private constructor(private val context: Context) {
     }
     
     /**
-     * Write a log entry to the audit file
+     * Log interception event (generic)
+     * @param eventType Type of interception event
+     * @param sessionId Session identifier
+     * @param details Additional details about the event
+     */
+    fun logInterceptionEvent(eventType: String, sessionId: String, details: String = "") {
+        val fullDetails = if (details.isNotEmpty()) {
+            "session=$sessionId, $details"
+        } else {
+            "session=$sessionId"
+        }
+        writeLogEntry("INTERCEPT_$eventType", fullDetails)
+    }
+    
+    /**
+     * Write a log entry to the audit file using atomic write
+     * Write to temp file first, then rename to final (atomic on most filesystems)
      */
     private fun writeLogEntry(eventType: String, details: String) {
         try {
             val timestamp = dateFormat.format(Date())
             val entry = "[$timestamp] $eventType | $details\n"
             
-            FileWriter(logFile, true).use { writer ->
-                writer.append(entry)
+            // Write to temp file first
+            val tempFile = File(logFile.parentFile, "${LOG_FILE_NAME}.tmp")
+            
+            // Read existing content
+            val existingContent = if (logFile.exists()) {
+                logFile.readText(Charsets.UTF_8)
+            } else {
+                ""
             }
+            
+            // Write combined content to temp file
+            FileOutputStream(tempFile).use { fos ->
+                OutputStreamWriter(fos, StandardCharsets.UTF_8).use { writer ->
+                    writer.write(existingContent)
+                    writer.write(entry)
+                }
+            }
+            
+            // Rename temp to final (atomic on most filesystems)
+            tempFile.renameTo(logFile)
             
             Log.i(TAG, "📝 Audit log: $eventType - $details")
         } catch (e: Exception) {
