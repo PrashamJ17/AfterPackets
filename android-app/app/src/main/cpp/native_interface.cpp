@@ -368,4 +368,74 @@ Java_com_packethunter_mobile_capture_NativeForwarder_getForwarderStats(
                          static_cast<jlong>(stats.errors));
 }
 
+// Pause/resume JNI functions for interception
+JNIEXPORT jboolean JNICALL
+Java_com_packethunter_mobile_capture_NativeForwarder_pauseSessionNative(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring sessionId
+) {
+    if (forwarder == nullptr) {
+        LOGE("Forwarder not running");
+        return JNI_FALSE;
+    }
+    
+    const char* sessionIdChars = env->GetStringUTFChars(sessionId, nullptr);
+    if (sessionIdChars == nullptr) {
+        LOGE("Failed to get session ID string");
+        return JNI_FALSE;
+    }
+    
+    std::string sessionIdStr(sessionIdChars);
+    env->ReleaseStringUTFChars(sessionId, sessionIdChars);
+    
+    bool result = forwarder->pauseSession(sessionIdStr);
+    LOGI("⏸️ JNI: pauseSession(%s) = %s", sessionIdStr.c_str(), result ? "true" : "false");
+    
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_packethunter_mobile_capture_NativeForwarder_resumeSessionNative(
+    JNIEnv* env,
+    jobject /* this */,
+    jstring sessionId,
+    jbyteArray modifiedPayload
+) {
+    if (forwarder == nullptr) {
+        LOGE("Forwarder not running");
+        return JNI_FALSE;
+    }
+    
+    const char* sessionIdChars = env->GetStringUTFChars(sessionId, nullptr);
+    if (sessionIdChars == nullptr) {
+        LOGE("Failed to get session ID string");
+        return JNI_FALSE;
+    }
+    
+    std::string sessionIdStr(sessionIdChars);
+    env->ReleaseStringUTFChars(sessionId, sessionIdChars);
+    
+    bool result = false;
+    
+    if (modifiedPayload != nullptr) {
+        jsize len = env->GetArrayLength(modifiedPayload);
+        jbyte* bytes = env->GetByteArrayElements(modifiedPayload, nullptr);
+        
+        if (bytes != nullptr) {
+            result = forwarder->resumeSession(sessionIdStr, 
+                                             reinterpret_cast<const uint8_t*>(bytes),
+                                             static_cast<size_t>(len));
+            env->ReleaseByteArrayElements(modifiedPayload, bytes, JNI_ABORT);
+        }
+    } else {
+        // Resume with original (unmodified) packets
+        result = forwarder->resumeSession(sessionIdStr, nullptr, 0);
+    }
+    
+    LOGI("▶️ JNI: resumeSession(%s) = %s", sessionIdStr.c_str(), result ? "true" : "false");
+    
+    return result ? JNI_TRUE : JNI_FALSE;
+}
+
 } // extern "C"

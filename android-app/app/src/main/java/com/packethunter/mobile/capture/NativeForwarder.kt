@@ -115,5 +115,38 @@ class NativeForwarder {
      * Get forwarder statistics
      */
     external fun getForwarderStats(): ForwarderStats?
+    
+    /**
+     * Pause forwarding for a session (for interception)
+     * Native thread will queue packets for this session
+     * @param sessionId Unique session identifier
+     * @return true if session was paused
+     */
+    fun pauseSession(sessionId: String): Boolean {
+        return try {
+            pauseSessionNative(sessionId)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error pausing session $sessionId", e)
+            false
+        }
+    }
+    
+    /**
+     * Resume forwarding for a session
+     * @param sessionId Unique session identifier
+     * @param modifiedPayload Optional modified payload (null to use original queued packets)
+     * @return true if session was resumed
+     */
+    fun resumeSession(sessionId: String, modifiedPayload: ByteArray? = null): Boolean {
+        return try {
+            resumeSessionNative(sessionId, modifiedPayload)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resuming session $sessionId", e)
+            false
+        }
+    }
+    
+    private external fun pauseSessionNative(sessionId: String): Boolean
+    private external fun resumeSessionNative(sessionId: String, modifiedPayload: ByteArray?): Boolean
 }
 

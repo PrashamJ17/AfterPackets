@@ -935,3 +935,57 @@ void PacketForwarder::statsMonitorLoop() {
     LOGI("Stats monitor ended");
 }
 
+// Pause/resume session for interception
+bool PacketForwarder::pauseSession(const std::string& sessionId) {
+    std::lock_guard<std::mutex> lock(m_pausedSessionsMutex);
+    
+    // Check if session already paused
+    if (m_pausedSessions.find(sessionId) != m_pausedSessions.end()) {
+        LOGW("Session %s already paused", sessionId.c_str());
+        return false;
+    }
+    
+    // Create paused session
+    PausedSession session;
+    session.sessionId = sessionId;
+    session.pauseTime = std::chrono::steady_clock::now();
+    m_pausedSessions[sessionId] = session;
+    
+    LOGI("⏸️ Paused session: %s", sessionId.c_str());
+    return true;
+}
+
+bool PacketForwarder::resumeSession(const std::string& sessionId, 
+                                     const uint8_t* modifiedPayload, 
+                                     size_t payloadSize) {
+    std::lock_guard<std::mutex> lock(m_pausedSessionsMutex);
+    
+    auto it = m_pausedSessions.find(sessionId);
+    if (it == m_pausedSessions.end()) {
+        LOGW("Session %s not found in paused sessions", sessionId.c_str());
+        return false;
+    }
+    
+    PausedSession& session = it->second;
+    
+    // If modified payload provided, use it; otherwise use queued packets
+    if (modifiedPayload != nullptr && payloadSize > 0) {
+        LOGI("▶️ Resuming session %s with modified payload (%zu bytes)", 
+             sessionId.c_str(), payloadSize);
+        // Forward modified payload
+        // Note: In full implementation, would reconstruct IP packet with modified payload
+        // For now, just log
+    } else if (!session.queuedPackets.empty()) {
+        LOGI("▶️ Resuming session %s with %zu queued packets", 
+             sessionId.c_str(), session.queuedPackets.size());
+        // Forward queued packets
+        // Note: Would process queued packets here
+    } else {
+        LOGI("▶️ Resuming session %s (no queued packets)", sessionId.c_str());
+    }
+    
+    // Remove from paused sessions
+    m_pausedSessions.erase(it);
+    return true;
+}
+

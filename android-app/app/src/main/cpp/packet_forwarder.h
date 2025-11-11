@@ -10,6 +10,7 @@
 #include <vector>
 #include <map>
 #include <chrono>
+#include <condition_variable>
 
 // Forward declaration
 struct ForwarderContext;
@@ -43,6 +44,24 @@ public:
      * Check if forwarder is running
      */
     bool isRunning() const;
+    
+    /**
+     * Pause forwarding for a session (for interception)
+     * @param sessionId Unique session identifier
+     * @return true if session was paused
+     */
+    bool pauseSession(const std::string& sessionId);
+    
+    /**
+     * Resume forwarding for a session
+     * @param sessionId Unique session identifier
+     * @param modifiedPayload Optional modified payload (nullptr to use original)
+     * @param payloadSize Size of modified payload (0 to use original)
+     * @return true if session was resumed
+     */
+    bool resumeSession(const std::string& sessionId, 
+                       const uint8_t* modifiedPayload = nullptr, 
+                       size_t payloadSize = 0);
     
     /**
      * Get statistics
@@ -106,6 +125,18 @@ private:
         int socketFd = -1;
         std::chrono::steady_clock::time_point lastActivity;
     };
+    
+    // Session pause/resume for interception
+    struct PausedSession {
+        std::string sessionId;
+        std::vector<uint8_t> queuedPackets;
+        std::chrono::steady_clock::time_point pauseTime;
+        static constexpr size_t MAX_QUEUE_SIZE = 100; // Max queued packets
+    };
+    
+    std::mutex m_pausedSessionsMutex;
+    std::map<std::string, PausedSession> m_pausedSessions;
+    static constexpr auto SESSION_TIMEOUT = std::chrono::seconds(30);
     
     std::mutex m_connectionsMutex;
     std::vector<TcpConnection> m_tcpConnections;
