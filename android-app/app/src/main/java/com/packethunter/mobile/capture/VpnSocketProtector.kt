@@ -19,6 +19,65 @@ import java.nio.channels.SocketChannel
 object VpnSocketProtector {
     private const val TAG = "VpnSocketProtector"
     
+    // Track statistics for debugging
+    @Volatile
+    private var protectSuccessCount = 0
+    @Volatile
+    private var protectFailCount = 0
+    
+    // Store VpnService instance for JNI access
+    @Volatile
+    private var vpnServiceInstance: VpnService? = null
+    
+    /**
+     * Initialize with VpnService instance (called from PacketCaptureService)
+     */
+    fun initialize(vpnService: VpnService) {
+        vpnServiceInstance = vpnService
+        Log.i(TAG, "VpnSocketProtector initialized")
+    }
+    
+    /**
+     * Clear VpnService instance (called on service destroy)
+     */
+    fun clear() {
+        vpnServiceInstance = null
+        Log.i(TAG, "VpnSocketProtector cleared. Stats: success=$protectSuccessCount, fail=$protectFailCount")
+    }
+    
+    /**
+     * Protect a socket by file descriptor - JNI accessible
+     * CRITICAL: This is called from native code via JNI
+     * 
+     * @param fd The file descriptor
+     * @return true if protection succeeded, false otherwise
+     */
+    @JvmStatic
+    fun protectFd(fd: Int): Boolean {
+        val vpnService = vpnServiceInstance
+        if (vpnService == null) {
+            Log.e(TAG, "Cannot protect FD $fd - VpnService not initialized")
+            protectFailCount++
+            return false
+        }
+        
+        return try {
+            val result = vpnService.protect(fd)
+            if (result) {
+                protectSuccessCount++
+                Log.d(TAG, "✅ Protected socket FD=$fd (success count: $protectSuccessCount)")
+            } else {
+                protectFailCount++
+                Log.e(TAG, "❌ Failed to protect socket FD=$fd (fail count: $protectFailCount)")
+            }
+            result
+        } catch (e: Exception) {
+            protectFailCount++
+            Log.e(TAG, "❌ Exception protecting socket FD=$fd", e)
+            false
+        }
+    }
+    
     /**
      * Protect a TCP Socket from VPN routing
      * 

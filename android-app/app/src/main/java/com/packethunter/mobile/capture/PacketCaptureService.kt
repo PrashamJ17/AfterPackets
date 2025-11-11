@@ -110,6 +110,9 @@ class PacketCaptureService : VpnService() {
         
         Log.d(TAG, "Starting packet capture")
         
+        // Initialize VpnSocketProtector with this service instance
+        VpnSocketProtector.initialize(this)
+        
         // Show notification
         val notification = createNotification()
         
@@ -296,6 +299,9 @@ class PacketCaptureService : VpnService() {
         Log.d(TAG, "Stopping packet capture")
 
         isRunning = false
+        
+        // Clear VpnSocketProtector
+        VpnSocketProtector.clear()
 
         // Stop native forwarder first
         try {

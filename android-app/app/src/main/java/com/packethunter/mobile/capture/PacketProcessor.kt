@@ -212,6 +212,9 @@ class PacketProcessor(
     }
 
     private fun createPacketInfo(parsed: ParsedPacketData): PacketInfo {
+        // Determine direction based on source IP
+        // VPN address is 10.0.0.2, packets FROM this are outbound, TO this are inbound
+        val direction = if (parsed.sourceIp == "10.0.0.2") "inbound" else "outbound"
         return PacketInfo(
             timestamp = System.currentTimeMillis(),
             protocol = parsed.protocol,
@@ -224,7 +227,7 @@ class PacketProcessor(
             payload = parsed.payload,
             payloadPreview = parsed.payloadPreview,
             sessionId = generateSessionId(parsed),
-            direction = "outbound",
+            direction = direction,
             httpMethod = parsed.httpMethod,
             httpUrl = parsed.httpUrl,
             dnsQuery = parsed.dnsQuery,
@@ -239,6 +242,9 @@ class PacketProcessor(
      */
     fun createPacketInfoForBreakpoint(parsed: ParsedPacketData): PacketInfo? {
         return try {
+            // Determine direction
+            val direction = if (parsed.sourceIp == "10.0.0.2") "inbound" else "outbound"
+            
             PacketInfo(
                 timestamp = System.currentTimeMillis(),
                 protocol = parsed.protocol,
@@ -251,7 +257,7 @@ class PacketProcessor(
                 payload = parsed.payload,
                 payloadPreview = parsed.payloadPreview ?: "",
                 sessionId = generateSessionId(parsed),
-                direction = "outbound",
+                direction = direction,
                 httpMethod = parsed.httpMethod,
                 httpUrl = parsed.httpUrl,
                 dnsQuery = parsed.dnsQuery,
@@ -391,6 +397,8 @@ class DetectionEngine(private val database: PacketDatabase) {
     
     suspend fun checkPacket(packet: PacketInfo) {
         // Check built-in detections
+        checkForUnencryptedHttp(packet)
+        checkForForeignServer(packet)
         checkForMITM(packet)
         checkForDataExfiltration(packet)
         
@@ -398,6 +406,59 @@ class DetectionEngine(private val database: PacketDatabase) {
         for (rule in rules) {
             checkRule(rule, packet)
         }
+    }
+    
+    private suspend fun checkForUnencryptedHttp(packet: PacketInfo) {
+        if (packet.protocol == "TCP" && packet.destPort == 80 && packet.httpMethod != null) {
+            val alert = Alert(
+                timestamp = System.currentTimeMillis(),
+                severity = "medium",
+                type = "http",
+                title = "Unencrypted HTTP Traffic",
+                description = "${packet.httpMethod} ${packet.httpUrl ?: "request"} over HTTP (port 80) - data not encrypted",
+                relatedPacketIds = packet.id.toString()
+            )
+            database.alertDao().insertAlert(alert)
+            Log.i(TAG, "Alert: Unencrypted HTTP to ${packet.destIp}")
+        }
+    }
+    
+    private suspend fun checkForForeignServer(packet: PacketInfo) {
+        // Check if connecting to foreign IP (non-RFC1918 private addresses)
+        if (packet.direction == "outbound" && !isPrivateIp(packet.destIp)) {
+            // Only alert for first connection to this IP
+            val key = "foreign_${packet.destIp}"
+            if (!certFingerprints.containsKey(key)) {
+                certFingerprints[key] = "alerted"
+                
+                val alert = Alert(
+                    timestamp = System.currentTimeMillis(),
+                    severity = "low",
+                    type = "foreign",
+                    title = "Foreign Server Connection",
+                    description = "Connection to ${packet.destIp}:${packet.destPort} (${packet.protocol})",
+                    relatedPacketIds = packet.id.toString()
+                )
+                database.alertDao().insertAlert(alert)
+                Log.i(TAG, "Alert: Foreign connection to ${packet.destIp}")
+            }
+        }
+    }
+    
+    private fun isPrivateIp(ip: String): Boolean {
+        val parts = ip.split(".").mapNotNull { it.toIntOrNull() }
+        if (parts.size != 4) return false
+        
+        // 10.0.0.0/8
+        if (parts[0] == 10) return true
+        // 172.16.0.0/12
+        if (parts[0] == 172 && parts[1] in 16..31) return true
+        // 192.168.0.0/16
+        if (parts[0] == 192 && parts[1] == 168) return true
+        // localhost
+        if (parts[0] == 127) return true
+        
+        return false
     }
     
     private suspend fun checkForMITM(packet: PacketInfo) {

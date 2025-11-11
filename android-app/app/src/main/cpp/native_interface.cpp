@@ -188,10 +188,10 @@ Java_com_packethunter_mobile_capture_NativeForwarder_startForwarderNative(
     // Create forwarder
     forwarder = new PacketForwarder();
     
-    // Protect callback wrapper
+    // Protect callback wrapper - calls VpnSocketProtector.protectFd()
     auto protectWrapper = [](int fd) -> bool {
-        if (g_jvm == nullptr || g_protectCallback == nullptr) {
-            LOGE("JVM or protect callback is null");
+        if (g_jvm == nullptr) {
+            LOGE("JVM is null in protect callback");
             return false;
         }
         
@@ -203,20 +203,33 @@ Java_com_packethunter_mobile_capture_NativeForwarder_startForwarderNative(
                 LOGE("Failed to attach thread for protect()");
                 return false;
             }
-        } else if (getEnvStat == JNI_OK) {
-            // Already attached
-        } else {
+        } else if (getEnvStat != JNI_OK) {
             LOGE("Failed to get JNI environment");
             return false;
         }
         
-        jboolean result = env->CallBooleanMethod(g_protectCallback, g_protectMethod, fd);
-        
-        if (result == JNI_TRUE) {
-            LOGI("✅ Protected socket %d", fd);
-        } else {
-            LOGE("❌ Failed to protect socket %d", fd);
+        // Call VpnSocketProtector.protectFd(fd)
+        jclass protectorClass = env->FindClass("com/packethunter/mobile/capture/VpnSocketProtector");
+        if (protectorClass == nullptr) {
+            LOGE("Cannot find VpnSocketProtector class");
+            if (getEnvStat == JNI_EDETACHED) {
+                g_jvm->DetachCurrentThread();
+            }
+            return false;
         }
+        
+        jmethodID protectMethod = env->GetStaticMethodID(protectorClass, "protectFd", "(I)Z");
+        if (protectMethod == nullptr) {
+            LOGE("Cannot find protectFd method");
+            env->DeleteLocalRef(protectorClass);
+            if (getEnvStat == JNI_EDETACHED) {
+                g_jvm->DetachCurrentThread();
+            }
+            return false;
+        }
+        
+        jboolean result = env->CallStaticBooleanMethod(protectorClass, protectMethod, fd);
+        env->DeleteLocalRef(protectorClass);
         
         if (getEnvStat == JNI_EDETACHED) {
             g_jvm->DetachCurrentThread();

@@ -435,7 +435,14 @@ void PacketForwarder::handleDnsPacket(const uint8_t* udpData, size_t udpLen,
     ssize_t received = recv(dnsSocket, responseBuffer, sizeof(responseBuffer), 0);
     if (received > 0) {
         LOGD("DNS response received: %zd bytes", received);
-        // TODO: Reconstruct IP/UDP headers and write to TUN
+        
+        // Write DNS response back to TUN
+        writeUdpResponseToTun(m_tunFd, dstIp, srcIp, dstPort, srcPort,
+                             responseBuffer, received);
+        
+        std::lock_guard<std::mutex> statsLock(m_statsMutex);
+        m_stats.packetsForwarded++;
+        m_stats.bytesForwarded += received;
     }
     
     close(dnsSocket);
@@ -508,13 +515,41 @@ bool PacketForwarder::sendUdpPacket(int fd, const uint8_t* data, size_t len,
 }
 
 void PacketForwarder::writeToTun(const uint8_t* data, size_t len) {
-    if (m_tunFd >= 0) {
-        ssize_t written = write(m_tunFd, data, len);
+    if (m_tunFd < 0 || len == 0) {
+        return;
+    }
+    
+    size_t totalWritten = 0;
+    const uint8_t* ptr = data;
+    
+    // Handle partial writes with loop
+    while (totalWritten < len) {
+        ssize_t written = write(m_tunFd, ptr + totalWritten, len - totalWritten);
+        
         if (written < 0) {
-            LOGE("Failed to write to TUN: %s", strerror(errno));
-        } else if (written != static_cast<ssize_t>(len)) {
-            LOGW("Partial write to TUN: %zd/%zu bytes", written, len);
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Would block - wait a bit and retry
+                usleep(100);
+                continue;
+            } else if (errno == EINTR) {
+                // Interrupted - retry
+                continue;
+            } else {
+                LOGE("Failed to write to TUN: %s", strerror(errno));
+                return;
+            }
+        } else if (written == 0) {
+            LOGW("Write to TUN returned 0 bytes");
+            return;
         }
+        
+        totalWritten += written;
+    }
+    
+    if (totalWritten < len) {
+        LOGW("Partial write to TUN: %zu/%zu bytes", totalWritten, len);
+    } else {
+        LOGD("⬇️ Wrote %zu bytes to TUN (inbound packet)", totalWritten);
     }
 }
 
