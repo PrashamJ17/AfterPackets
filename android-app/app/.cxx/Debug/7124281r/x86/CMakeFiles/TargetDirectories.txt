@@ -1,0 +1,3 @@
+/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/.cxx/Debug/7124281r/x86/CMakeFiles/packethunter.dir
+/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/.cxx/Debug/7124281r/x86/CMakeFiles/edit_cache.dir
+/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/.cxx/Debug/7124281r/x86/CMakeFiles/rebuild_cache.dir

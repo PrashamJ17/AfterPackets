@@ -1,0 +1,4 @@
+/Users/prasham/Library/Android/sdk/cmake/3.22.1/bin/ninja \
+  -C \
+  /Users/prasham/Desktop/AfterPackets/android-app/app/.cxx/Debug/266a4i42/arm64-v8a \
+  packethunter

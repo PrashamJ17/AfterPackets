@@ -1,0 +1,12 @@
+[
+{
+  "directory": "/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/.cxx/Debug/7124281r/x86",
+  "command": "/Users/prasham/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=i686-none-linux-android26 --sysroot=/Users/prasham/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dpackethunter_EXPORTS -I/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/src/main/cpp -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -std=gnu++17 -o CMakeFiles/packethunter.dir/packet_parser.cpp.o -c /Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/src/main/cpp/packet_parser.cpp",
+  "file": "/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/src/main/cpp/packet_parser.cpp"
+},
+{
+  "directory": "/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/.cxx/Debug/7124281r/x86",
+  "command": "/Users/prasham/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=i686-none-linux-android26 --sysroot=/Users/prasham/Library/Android/sdk/ndk/25.1.8937393/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dpackethunter_EXPORTS -I/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/src/main/cpp -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security   -fno-limit-debug-info  -fPIC -std=gnu++17 -o CMakeFiles/packethunter.dir/native_interface.cpp.o -c /Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/src/main/cpp/native_interface.cpp",
+  "file": "/Users/prasham/CascadeProjects/mobile-packet-hunter/android-app/app/src/main/cpp/native_interface.cpp"
+}
+]

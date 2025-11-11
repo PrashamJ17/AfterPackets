@@ -1,0 +1,3 @@
+/Users/prasham/Desktop/AfterPackets/android-app/app/.cxx/Debug/1r4t2ke1/x86/CMakeFiles/packethunter.dir
+/Users/prasham/Desktop/AfterPackets/android-app/app/.cxx/Debug/1r4t2ke1/x86/CMakeFiles/edit_cache.dir
+/Users/prasham/Desktop/AfterPackets/android-app/app/.cxx/Debug/1r4t2ke1/x86/CMakeFiles/rebuild_cache.dir

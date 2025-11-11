@@ -1,0 +1,5 @@
+ninja: Entering directory `/Users/prasham/Desktop/AfterPackets/android-app/app/.cxx/Debug/266a4i42/arm64-v8a'
+[1/4] Building CXX object CMakeFiles/packethunter.dir/native_interface.cpp.o
+[2/4] Building CXX object CMakeFiles/packethunter.dir/packet_parser.cpp.o
+[3/4] Building CXX object CMakeFiles/packethunter.dir/packet_forwarder.cpp.o
+[4/4] Linking CXX shared library /Users/prasham/Desktop/AfterPackets/android-app/app/build/intermediates/cxx/Debug/266a4i42/obj/arm64-v8a/libpackethunter.so

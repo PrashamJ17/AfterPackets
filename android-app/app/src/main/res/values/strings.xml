@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AFTERPACKETS</string>
+    <string name="vpn_service_notification_channel">Packet Capture Service</string>
+    <string name="vpn_service_notification_title">Capturing Network Traffic</string>
+    <string name="vpn_service_notification_text">Analyzing packets in real-time</string>
+    
+    <!-- Dashboard -->
+    <string name="dashboard_title">AFTERPACKETS</string>
+    <string name="packets_per_sec">Packets/sec</string>
+    <string name="bandwidth">Bandwidth</string>
+    <string name="protocols">Protocols</string>
+    <string name="top_talkers">Top Talkers</string>
+    
+    <!-- Capture Controls -->
+    <string name="start_capture">Start Capture</string>
+    <string name="stop_capture">Stop Capture</string>
+    <string name="capturing">Capturing…</string>
+    
+    <!-- Consent -->
+    <string name="consent_title">Legal Notice</string>
+    <string name="consent_message">By using this app, you confirm that you have legal permission to capture and analyze network traffic on this device and network. Unauthorized network monitoring may be illegal in your jurisdiction.</string>
+    <string name="consent_accept">I Understand and Accept</string>
+    <string name="consent_decline">Decline</string>
+    
+    <!-- Filters -->
+    <string name="filter_http">HTTP/HTTPS</string>
+    <string name="filter_dns">DNS</string>
+    <string name="filter_large_transfer">Large Transfer</string>
+    <string name="filter_icmp">ICMP</string>
+    <string name="filter_tls_cert">Cert Changes</string>
+    
+    <!-- Export -->
+    <string name="export_pcap">Export PCAP</string>
+    <string name="export_json">Export JSON</string>
+    <string name="export_bundle">Export Bundle</string>
+    
+    <!-- Alerts -->
+    <string name="alert_mitm">Possible MITM Attack</string>
+    <string name="alert_dns_spoof">DNS Spoofing Detected</string>
+    <string name="alert_data_exfil">Large Data Transfer</string>
+    <string name="alert_arp_spoof">ARP Spoofing</string>
+</resources>

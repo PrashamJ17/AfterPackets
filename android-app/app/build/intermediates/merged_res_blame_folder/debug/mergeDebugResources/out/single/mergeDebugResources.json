@@ -1,0 +1,66 @@
+[
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-xhdpi_ic_launcher_round.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-xhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/xml_file_paths.xml.flat",
+        "source": "com.packethunter.mobile.app-main-69:/xml/file_paths.xml"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-anydpi-v26_ic_launcher_round.xml.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-anydpi-v26/ic_launcher_round.xml"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/xml_data_extraction_rules.xml.flat",
+        "source": "com.packethunter.mobile.app-main-69:/xml/data_extraction_rules.xml"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-hdpi_ic_launcher.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-hdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-hdpi_ic_launcher_round.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-hdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/xml_backup_rules.xml.flat",
+        "source": "com.packethunter.mobile.app-main-69:/xml/backup_rules.xml"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-xxxhdpi_ic_launcher_round.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-xxxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-xxhdpi_ic_launcher.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-xxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-mdpi_ic_launcher.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-mdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/drawable_ic_launcher_foreground.xml.flat",
+        "source": "com.packethunter.mobile.app-main-69:/drawable/ic_launcher_foreground.xml"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-anydpi-v26_ic_launcher.xml.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-anydpi-v26/ic_launcher.xml"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-xxhdpi_ic_launcher_round.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-xxhdpi/ic_launcher_round.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-xxxhdpi_ic_launcher.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-xxxhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-xhdpi_ic_launcher.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-xhdpi/ic_launcher.png"
+    },
+    {
+        "merged": "com.packethunter.mobile.app-debug-67:/mipmap-mdpi_ic_launcher_round.png.flat",
+        "source": "com.packethunter.mobile.app-main-69:/mipmap-mdpi/ic_launcher_round.png"
+    }
+]
