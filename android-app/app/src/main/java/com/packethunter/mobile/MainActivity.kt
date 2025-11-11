@@ -95,6 +95,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        // Install global crash handler
+        CrashHandler.install(this)
+        
         // Initialize AuthorizedTestingMode
         AuthorizedTestingMode.initialize(this)
 

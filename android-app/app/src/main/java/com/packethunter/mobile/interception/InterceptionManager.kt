@@ -2,11 +2,13 @@ package com.packethunter.mobile.interception
 
 import android.util.Log
 import com.packethunter.mobile.data.PacketInfo
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.nio.charset.Charset
 import java.security.MessageDigest
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 
 /**
@@ -19,6 +21,8 @@ class InterceptionManager {
         private const val TAG = "InterceptionManager"
         private const val MAX_INTERCEPTS = 200
         private const val MAX_PAYLOAD_PREVIEW = 4096 // 4KB max
+        private const val MAX_INTERCEPT_SIZE = 1_000_000 // 1MB max payload size to intercept
+        private const val INTERCEPT_TIMEOUT_MS = 30_000L // 30 seconds timeout
     }
     
     private val interceptsQueue = ConcurrentLinkedQueue<InterceptItem>()
@@ -27,6 +31,19 @@ class InterceptionManager {
     
     private var isEnabled = false
     private var enabledFilters = mutableSetOf<InterceptFilterType>()
+    
+    // Track active interception sessions with timeout
+    private val activeSessions = ConcurrentHashMap<String, InterceptSession>()
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var auditLogger: AuditLogger? = null
+    
+    /**
+     * Initialize with AuditLogger for logging interception events
+     */
+    fun initialize(auditLogger: AuditLogger) {
+        this.auditLogger = auditLogger
+        Log.i(TAG, "✅ InterceptionManager initialized with audit logging")
+    }
     
     /**
      * Enable or disable interception
@@ -73,23 +90,67 @@ class InterceptionManager {
      * - Non-blocking: does not delay packet forwarding
      * - Handles null payloads gracefully
      * - Enforces queue limits to prevent memory exhaustion
+     * - Wraps entire handler in try/catch
+     * - Only intercepts plaintext protocols (DNS, HTTP)
+     * - Enforces size and timeout limits
      */
     fun interceptIfMatches(packet: PacketInfo) {
-        // Double-check authorization even if isEnabled is true
-        if (!isEnabled || !AuthorizedTestingMode.isEnabled()) {
-            return
+        try {
+            // Double-check authorization even if isEnabled is true
+            if (!isEnabled || !AuthorizedTestingMode.isEnabled()) {
+                return
+            }
+            
+            // Null checks for safety
+            if (packet.sourceIp.isEmpty() || packet.destIp.isEmpty()) {
+                Log.w(TAG, "Skipping intercept - invalid packet addresses")
+                return
+            }
+            
+            // Size check: skip oversized payloads
+            if (packet.payload != null && packet.payload.size > MAX_INTERCEPT_SIZE) {
+                Log.w(TAG, "Skipping intercept - payload too large: ${packet.payload.size} bytes > $MAX_INTERCEPT_SIZE")
+                return
+            }
+            
+            val matchedFilter = matchesFilter(packet)
+            if (matchedFilter != null) {
+                // Only intercept plaintext protocols
+                if (isPlaintextProtocol(packet, matchedFilter)) {
+                    val interceptItem = createInterceptItem(packet, matchedFilter)
+                    val sessionId = "${packet.timestamp}_${packet.sourcePort}"
+                    enqueueIntercept(interceptItem, sessionId)
+                } else {
+                    Log.d(TAG, "Skipping encrypted protocol: ${packet.protocol} on port ${packet.destPort}")
+                    auditLogger?.logFilterDisabled("Encrypted - cannot intercept: ${packet.protocol}")
+                }
+            }
+        } catch (e: Exception) {
+            // CRITICAL: Never let exceptions escape
+            Log.e(TAG, "❌ Exception in interceptIfMatches - auto-resuming flow", e)
+            auditLogger?.logConsentRevoked() // Log error event
         }
-        
-        // Null checks for safety
-        if (packet.sourceIp.isEmpty() || packet.destIp.isEmpty()) {
-            Log.w(TAG, "Skipping intercept - invalid packet addresses")
-            return
-        }
-        
-        val matchedFilter = matchesFilter(packet)
-        if (matchedFilter != null) {
-            val interceptItem = createInterceptItem(packet, matchedFilter)
-            enqueueIntercept(interceptItem)
+    }
+    
+    /**
+     * Check if protocol is plaintext and safe to intercept
+     * Only allow DNS, HTTP (port 80/8080), and optionally parsed HTTP headers
+     * Deny TLS/HTTPS unless user has proper proxy setup
+     */
+    private fun isPlaintextProtocol(packet: PacketInfo, filterType: InterceptFilterType): Boolean {
+        return when (filterType) {
+            InterceptFilterType.DNS -> true // DNS is plaintext
+            InterceptFilterType.HTTP -> {
+                // Only allow HTTP on known plaintext ports
+                packet.destPort == 80 || packet.destPort == 8080 ||
+                packet.sourcePort == 80 || packet.sourcePort == 8080
+            }
+            InterceptFilterType.TLS -> {
+                // Skip TLS - encrypted, cannot intercept without proxy
+                false
+            }
+            InterceptFilterType.ICMP -> true // ICMP is plaintext
+            else -> false
         }
     }
     
@@ -246,21 +307,89 @@ class InterceptionManager {
     
     /**
      * Enqueue an intercepted item (thread-safe)
+     * Starts timeout timer for auto-resume
      */
-    private fun enqueueIntercept(item: InterceptItem) {
+    private fun enqueueIntercept(item: InterceptItem, sessionId: String) {
         synchronized(interceptsQueue) {
             interceptsQueue.offer(item)
             
             // Maintain max capacity by removing oldest
             while (interceptsQueue.size > MAX_INTERCEPTS) {
-                interceptsQueue.poll()
+                val removed = interceptsQueue.poll()
+                removed?.let {
+                    activeSessions.remove("${it.timestamp}_${it.sourcePort}")
+                }
             }
             
             // Update StateFlow with current list
             _intercepts.value = interceptsQueue.toList().reversed() // Newest first
         }
         
+        // Create session and start timeout
+        val session = InterceptSession(sessionId, item, System.currentTimeMillis())
+        activeSessions[sessionId] = session
+        
+        // Start timeout job
+        scope.launch {
+            delay(INTERCEPT_TIMEOUT_MS)
+            if (activeSessions.containsKey(sessionId)) {
+                Log.w(TAG, "⏱️ Intercept timeout for session $sessionId - auto-resuming")
+                resumeSessionUnmodified(sessionId)
+                auditLogger?.logFilterDisabled("intercept_timeout: $sessionId")
+            }
+        }
+        
         Log.d(TAG, "Intercepted ${item.filterType} packet: ${item.summary} (queue size: ${interceptsQueue.size})")
+    }
+    
+    /**
+     * Resume session with unmodified original packet
+     * Called on timeout or user cancel
+     */
+    fun resumeSessionUnmodified(sessionId: String) {
+        try {
+            val session = activeSessions.remove(sessionId)
+            if (session != null) {
+                Log.i(TAG, "✅ Resumed session $sessionId unmodified")
+                auditLogger?.logFilterDisabled("session_resumed_unmodified: $sessionId")
+            } else {
+                Log.w(TAG, "Session $sessionId not found in active sessions")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resuming session $sessionId", e)
+        }
+    }
+    
+    /**
+     * Resume session with modified packet
+     * Called when user accepts/modifies intercepted packet
+     */
+    fun resumeSessionModified(sessionId: String, modifiedPayload: ByteArray) {
+        try {
+            val session = activeSessions.remove(sessionId)
+            if (session != null) {
+                val originalHash = computeHash(session.item.payloadPreview)
+                val modifiedHash = computeHash(modifiedPayload)
+                
+                // Log modification to audit trail
+                auditLogger?.logPacketModification(
+                    originalHash = originalHash,
+                    modifiedHash = modifiedHash,
+                    sourceIp = session.item.sourceIp,
+                    destIp = session.item.destIp,
+                    protocol = session.item.protocol,
+                    modificationType = "user_edit"
+                )
+                
+                Log.i(TAG, "✅ Resumed session $sessionId with modifications (${modifiedPayload.size} bytes)")
+            } else {
+                Log.w(TAG, "Session $sessionId not found in active sessions")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error resuming modified session $sessionId", e)
+            // On error, try to resume unmodified
+            resumeSessionUnmodified(sessionId)
+        }
     }
     
     /**

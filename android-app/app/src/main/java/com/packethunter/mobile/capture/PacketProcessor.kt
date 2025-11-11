@@ -113,12 +113,27 @@ class PacketProcessor(
         webSocketServer.stop()
     }
 
+    /**
+     * Called from JNI native thread - MUST return quickly!
+     * Offloads processing to IO dispatcher to avoid blocking native forwarder.
+     */
     suspend fun processPacket(data: ByteArray) {
-        // Send to channel for processing (non-blocking, will never suspend due to UNLIMITED capacity)
-        val result = packetChannel.trySend(data)
-        if (result.isClosed) {
-            // If channel is closed, log but don't block
-            Log.w(TAG, "Packet channel closed, dropping packet")
+        try {
+            // Immediately offload to IO dispatcher and return to native thread
+            scope.launch(Dispatchers.IO) {
+                try {
+                    // Send to channel for processing (non-blocking)
+                    val result = packetChannel.trySend(data)
+                    if (result.isClosed) {
+                        Log.w(TAG, "Packet channel closed, dropping packet")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Exception in packet processing offload", e)
+                }
+            }
+        } catch (e: Exception) {
+            // Critical: never let exceptions escape to JNI layer
+            Log.e(TAG, "CRITICAL: Exception in JNI callback wrapper", e)
         }
     }
 
