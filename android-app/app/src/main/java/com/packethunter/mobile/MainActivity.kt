@@ -21,6 +21,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import com.packethunter.mobile.capture.PacketCaptureService
+import com.packethunter.mobile.interception.AuthorizedTestingMode
 import com.packethunter.mobile.ui.MainViewModel
 import com.packethunter.mobile.ui.PacketHunterApp
 import com.packethunter.mobile.ui.theme.MobilePacketHunterTheme
@@ -93,6 +94,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
+        // Initialize AuthorizedTestingMode
+        AuthorizedTestingMode.initialize(this)
 
         // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

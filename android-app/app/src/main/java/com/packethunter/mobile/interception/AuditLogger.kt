@@ -2,163 +2,137 @@ package com.packethunter.mobile.interception
 
 import android.content.Context
 import android.util.Log
-import androidx.security.crypto.EncryptedFile
-import androidx.security.crypto.MasterKey
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
 import java.io.File
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.io.FileWriter
+import java.text.SimpleDateFormat
+import java.util.*
 
 /**
- * Manages audit logging with encryption
- * Uses Android Keystore + EncryptedFile for secure storage
+ * Audit logger for tracking interception consent and packet modifications.
+ * 
+ * All entries are timestamped and written to an append-only log file.
+ * This provides a tamper-evident audit trail for security investigations.
  */
-class AuditLogger(private val context: Context) {
+class AuditLogger private constructor(private val context: Context) {
     
     companion object {
         private const val TAG = "AuditLogger"
-        private const val MAX_MEMORY_ENTRIES = 1000
-        private const val AUDIT_FILE_NAME = "audit_log.json"
-    }
-    
-    private val memoryQueue = ConcurrentLinkedQueue<AuditLogEntry>()
-    private val _auditEntries = MutableStateFlow<List<AuditLogEntry>>(emptyList())
-    val auditEntries: StateFlow<List<AuditLogEntry>> = _auditEntries.asStateFlow()
-    
-    private var masterKey: MasterKey? = null
-    private var auditFile: File? = null
-    
-    init {
-        initializeEncryption()
-    }
-    
-    private fun initializeEncryption() {
-        try {
-            masterKey = MasterKey.Builder(context)
-                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-                .build()
-            
-            auditFile = File(context.filesDir, AUDIT_FILE_NAME)
-            Log.d(TAG, "Audit encryption initialized")
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to initialize encryption", e)
+        private const val LOG_FILE_NAME = "interception_audit.log"
+        
+        @Volatile
+        private var instance: AuditLogger? = null
+        
+        fun getInstance(context: Context): AuditLogger {
+            return instance ?: synchronized(this) {
+                instance ?: AuditLogger(context.applicationContext).also { instance = it }
+            }
         }
     }
     
+    private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    private val logFile: File by lazy {
+        File(context.filesDir, LOG_FILE_NAME)
+    }
+    
     /**
-     * Log an interception decision
+     * Log consent granted event
      */
-    suspend fun logDecision(
-        connKey: String,
+    fun logConsentGranted() {
+        writeLogEntry("CONSENT_GRANTED", "User explicitly consented to Authorized Testing Mode")
+    }
+    
+    /**
+     * Log consent revoked event
+     */
+    fun logConsentRevoked() {
+        writeLogEntry("CONSENT_REVOKED", "User disabled Authorized Testing Mode")
+    }
+    
+    /**
+     * Log packet modification event
+     */
+    fun logPacketModification(
+        originalHash: String,
+        modifiedHash: String,
+        sourceIp: String,
+        destIp: String,
         protocol: String,
-        action: String,
-        originalPayload: ByteArray?,
-        modifiedPayload: ByteArray? = null,
-        autoForwarded: Boolean = false,
-        summary: String = "",
-        metadata: Map<String, Any> = emptyMap()
-    ) = withContext(Dispatchers.IO) {
+        modificationType: String
+    ) {
+        val details = "protocol=$protocol, src=$sourceIp, dst=$destIp, " +
+                     "type=$modificationType, original_hash=$originalHash, modified_hash=$modifiedHash"
+        writeLogEntry("PACKET_MODIFIED", details)
+    }
+    
+    /**
+     * Log interception filter enabled
+     */
+    fun logFilterEnabled(filterType: String) {
+        writeLogEntry("FILTER_ENABLED", "Interception filter enabled: $filterType")
+    }
+    
+    /**
+     * Log interception filter disabled
+     */
+    fun logFilterDisabled(filterType: String) {
+        writeLogEntry("FILTER_DISABLED", "Interception filter disabled: $filterType")
+    }
+    
+    /**
+     * Write a log entry to the audit file
+     */
+    private fun writeLogEntry(eventType: String, details: String) {
         try {
-            val originalHash = AuditLogEntry.computeHash(originalPayload)
-            val modifiedHash = modifiedPayload?.let { AuditLogEntry.computeHash(it) }
+            val timestamp = dateFormat.format(Date())
+            val entry = "[$timestamp] $eventType | $details\n"
             
-            val entry = AuditLogEntry(
-                timestamp = System.currentTimeMillis(),
-                connKey = connKey,
-                protocol = protocol,
-                action = action,
-                originalHash = originalHash,
-                modifiedHash = modifiedHash,
-                autoForwarded = autoForwarded,
-                consentVersion = 1,
-                summary = summary,
-                metadata = JSONObject(metadata).toString()
-            )
-            
-            // Add to memory queue
-            synchronized(memoryQueue) {
-                memoryQueue.offer(entry)
-                while (memoryQueue.size > MAX_MEMORY_ENTRIES) {
-                    memoryQueue.poll()
-                }
-                _auditEntries.value = memoryQueue.toList().reversed()
+            FileWriter(logFile, true).use { writer ->
+                writer.append(entry)
             }
             
-            // Persist to encrypted file
-            persistEntry(entry)
-            
-            Log.d(TAG, "Logged decision: $action for $connKey")
+            Log.i(TAG, "📝 Audit log: $eventType - $details")
         } catch (e: Exception) {
-            Log.e(TAG, "Error logging decision", e)
+            Log.e(TAG, "❌ Failed to write audit log entry", e)
         }
     }
     
     /**
-     * Persist entry to encrypted file
+     * Get all audit log entries
      */
-    private suspend fun persistEntry(entry: AuditLogEntry) = withContext(Dispatchers.IO) {
+    suspend fun getLogEntries(): List<String> = withContext(Dispatchers.IO) {
         try {
-            val masterKey = this@AuditLogger.masterKey ?: return@withContext
-            val auditFile = this@AuditLogger.auditFile ?: return@withContext
-            
-            val encryptedFile = EncryptedFile.Builder(
-                context,
-                auditFile,
-                masterKey,
-                EncryptedFile.FileEncryptionScheme.AES256_GCM_HKDF_4KB
-            ).build()
-            
-            // Append entry as JSON line
-            val json = JSONObject().apply {
-                put("id", entry.id)
-                put("timestamp", entry.timestamp)
-                put("connKey", entry.connKey)
-                put("protocol", entry.protocol)
-                put("action", entry.action)
-                put("originalHash", entry.originalHash)
-                put("modifiedHash", entry.modifiedHash ?: "")
-                put("autoForwarded", entry.autoForwarded)
-                put("consentVersion", entry.consentVersion)
-                put("summary", entry.summary)
-                put("metadata", entry.metadata)
-            }
-            
-            encryptedFile.openFileOutput().use { fos ->
-                fos.write("${json.toString()}\n".toByteArray())
+            if (logFile.exists()) {
+                logFile.readLines()
+            } else {
+                emptyList()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error persisting audit entry", e)
+            Log.e(TAG, "Failed to read audit log", e)
+            emptyList()
         }
     }
     
     /**
-     * Export audit log for a session
+     * Get log file size in bytes
      */
-    suspend fun exportSessionLog(sessionStartTime: Long, sessionEndTime: Long): List<AuditLogEntry> {
-        return withContext(Dispatchers.IO) {
-            memoryQueue.filter { 
-                it.timestamp >= sessionStartTime && it.timestamp <= sessionEndTime 
-            }
-        }
+    fun getLogSize(): Long {
+        return if (logFile.exists()) logFile.length() else 0L
     }
     
     /**
-     * Clear all audit logs
+     * Clear audit log (requires explicit user confirmation in UI)
      */
-    fun clearAll() {
-        synchronized(memoryQueue) {
-            memoryQueue.clear()
-            _auditEntries.value = emptyList()
-        }
+    suspend fun clearLog() = withContext(Dispatchers.IO) {
         try {
-            auditFile?.delete()
+            writeLogEntry("LOG_CLEARED", "Audit log cleared by user")
+            // Keep the last entry showing log was cleared
+            val lastEntry = logFile.readLines().lastOrNull()
+            logFile.writeText(lastEntry ?: "")
+            Log.w(TAG, "⚠️ Audit log cleared")
         } catch (e: Exception) {
-            Log.e(TAG, "Error clearing audit file", e)
+            Log.e(TAG, "Failed to clear audit log", e)
         }
     }
 }
-

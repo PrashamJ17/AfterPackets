@@ -30,16 +30,30 @@ class InterceptionManager {
     
     /**
      * Enable or disable interception
+     * REQUIRES: Authorized Testing Mode to be enabled
      */
     fun setEnabled(enabled: Boolean) {
+        if (enabled && !AuthorizedTestingMode.isEnabled()) {
+            Log.w(TAG, "❌ Cannot enable interception - Authorized Testing Mode is disabled")
+            Log.w(TAG, "User must explicitly consent to packet interception in Settings")
+            isEnabled = false
+            return
+        }
+        
         isEnabled = enabled
-        Log.d(TAG, "Interception ${if (enabled) "enabled" else "disabled"}")
+        Log.i(TAG, "Interception ${if (enabled) "enabled" else "disabled"}")
     }
     
     /**
      * Set which filter types to intercept
+     * REQUIRES: Authorized Testing Mode to be enabled
      */
     fun setEnabledFilters(filters: Set<InterceptFilterType>) {
+        if (!AuthorizedTestingMode.isEnabled() && filters.isNotEmpty()) {
+            Log.w(TAG, "❌ Cannot set interception filters - Authorized Testing Mode is disabled")
+            return
+        }
+        
         enabledFilters.clear()
         enabledFilters.addAll(filters)
         Log.d(TAG, "Enabled filters: ${enabledFilters.joinToString()}")
@@ -53,9 +67,24 @@ class InterceptionManager {
     /**
      * Process a parsed packet and intercept if it matches filters
      * This is called from PacketProcessor after parsing but before forwarding
+     * 
+     * SAFETY CHECKS:
+     * - Verifies Authorized Testing Mode is enabled
+     * - Non-blocking: does not delay packet forwarding
+     * - Handles null payloads gracefully
+     * - Enforces queue limits to prevent memory exhaustion
      */
     fun interceptIfMatches(packet: PacketInfo) {
-        if (!isEnabled) return
+        // Double-check authorization even if isEnabled is true
+        if (!isEnabled || !AuthorizedTestingMode.isEnabled()) {
+            return
+        }
+        
+        // Null checks for safety
+        if (packet.sourceIp.isEmpty() || packet.destIp.isEmpty()) {
+            Log.w(TAG, "Skipping intercept - invalid packet addresses")
+            return
+        }
         
         val matchedFilter = matchesFilter(packet)
         if (matchedFilter != null) {
