@@ -1,9 +1,12 @@
 package com.packethunter.mobile.export
 
+import android.content.ContentValues
 import android.content.Context
 import android.media.MediaScannerConnection
 import android.net.Uri
+import android.os.Build
 import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.google.gson.Gson
@@ -35,15 +38,16 @@ class ExportManager(private val context: Context) {
 
     /**
      * Export packets to PCAP format (Wireshark compatible)
+     * Uses MediaStore for Android 10+ to ensure file appears in Downloads
      */
     suspend fun exportToPcap(
         packets: List<PacketInfo>,
         filename: String = "capture_${System.currentTimeMillis()}.pcap"
     ): File = withContext(Dispatchers.IO) {
-        val exportDir = getExportDir()
-        val file = File(exportDir, filename)
-
-        FileOutputStream(file).use { fos ->
+        // First write to temp cache file
+        val tempFile = File(context.cacheDir, filename)
+        
+        FileOutputStream(tempFile).use { fos ->
             DataOutputStream(fos).use { dos ->
                 // Write PCAP global header
                 writePcapGlobalHeader(dos)
@@ -54,17 +58,21 @@ class ExportManager(private val context: Context) {
                 }
             }
         }
-
-        Log.d(TAG, "Exported ${packets.size} packets to PCAP: ${file.absolutePath}")
         
-        // Notify MediaScanner so file appears in Files app
-        notifyMediaScanner(file)
+        // Copy to Downloads using MediaStore (Android 10+) or direct write (older)
+        val finalFile = copyToDownloads(tempFile, filename, "application/vnd.tcpdump.pcap")
         
-        file
+        // Clean up temp file
+        tempFile.delete()
+        
+        Log.i(TAG, "✅ Exported ${packets.size} packets to PCAP: ${finalFile.absolutePath} (${finalFile.length()} bytes)")
+        
+        finalFile
     }
 
     /**
      * Export packets to JSON format
+     * Uses MediaStore for Android 10+ to ensure file appears in Downloads
      */
     suspend fun exportToJson(
         packets: List<PacketInfo>,
@@ -72,8 +80,8 @@ class ExportManager(private val context: Context) {
         stats: CaptureStats,
         filename: String = "capture_${System.currentTimeMillis()}.json"
     ): File = withContext(Dispatchers.IO) {
-        val exportDir = getExportDir()
-        val file = File(exportDir, filename)
+        // First write to temp cache file
+        val tempFile = File(context.cacheDir, filename)
 
         val exportData = ExportData(
             version = "1.0",
@@ -89,14 +97,17 @@ class ExportManager(private val context: Context) {
             )
         )
 
-        file.writeText(gson.toJson(exportData))
+        tempFile.writeText(gson.toJson(exportData))
+        
+        // Copy to Downloads using MediaStore (Android 10+) or direct write (older)
+        val finalFile = copyToDownloads(tempFile, filename, "application/json")
+        
+        // Clean up temp file
+        tempFile.delete()
 
-        Log.d(TAG, "Exported ${packets.size} packets to JSON: ${file.absolutePath}")
+        Log.i(TAG, "✅ Exported ${packets.size} packets to JSON: ${finalFile.absolutePath} (${finalFile.length()} bytes)")
         
-        // Notify MediaScanner so file appears in Files app
-        notifyMediaScanner(file)
-        
-        file
+        finalFile
     }
 
     /**
@@ -301,6 +312,82 @@ class ExportManager(private val context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to notify MediaScanner for ${file.absolutePath}", e)
         }
+    }
+    
+    /**
+     * Copy file to Downloads directory
+     * Uses MediaStore for Android 10+ (API 29+) or direct file copy for older versions
+     */
+    private fun copyToDownloads(sourceFile: File, filename: String, mimeType: String): File {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10+ (API 29+): Use MediaStore
+            copyToDownloadsMediaStore(sourceFile, filename, mimeType)
+        } else {
+            // Android 9 and below: Use direct file write with legacy external storage
+            copyToDownloadsLegacy(sourceFile, filename)
+        }
+    }
+    
+    /**
+     * Copy file to Downloads using MediaStore (Android 10+)
+     */
+    private fun copyToDownloadsMediaStore(sourceFile: File, filename: String, mimeType: String): File {
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, filename)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/PacketHunter")
+        }
+        
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            ?: throw IOException("Failed to create MediaStore entry for $filename")
+        
+        try {
+            resolver.openOutputStream(uri)?.use { outputStream ->
+                sourceFile.inputStream().use { inputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            } ?: throw IOException("Failed to open output stream for $filename")
+            
+            Log.i(TAG, "✅ File copied to Downloads via MediaStore: $filename")
+            
+            // Return a File object pointing to the Downloads directory
+            // Note: This is an approximation since MediaStore uses URIs
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            val packetHunterDir = File(downloadsDir, "PacketHunter")
+            return File(packetHunterDir, filename)
+            
+        } catch (e: Exception) {
+            // Clean up on failure
+            resolver.delete(uri, null, null)
+            throw e
+        }
+    }
+    
+    /**
+     * Copy file to Downloads using legacy file API (Android 9 and below)
+     */
+    private fun copyToDownloadsLegacy(sourceFile: File, filename: String): File {
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val packetHunterDir = File(downloadsDir, "PacketHunter")
+        
+        if (!packetHunterDir.exists()) {
+            packetHunterDir.mkdirs()
+            Log.i(TAG, "Created directory: ${packetHunterDir.absolutePath}")
+        }
+        
+        val destFile = File(packetHunterDir, filename)
+        sourceFile.inputStream().use { input ->
+            destFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        
+        // Notify MediaScanner so file appears in Files app
+        notifyMediaScanner(destFile)
+        
+        Log.i(TAG, "✅ File copied to Downloads (legacy): ${destFile.absolutePath}")
+        return destFile
     }
 
     private fun PacketInfo.toExportPacket(): ExportPacket {
