@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.packethunter.mobile.ui.screens.*
+import com.packethunter.mobile.ui.screens.DebugScreen
 import com.packethunter.mobile.ui.theme.*
 import com.packethunter.mobile.ui.formatBytes
 import com.packethunter.mobile.ui.utils.PreferenceManager
@@ -188,6 +189,7 @@ fun PacketHunterApp(
                     onExportBundle = { viewModel.exportBundle() },
                     onClearResult = { viewModel.clearExportResult() }
                 )
+                Screen.Debug -> DebugScreen()
                 Screen.Intercepts -> InterceptsScreen(
                     intercepts = viewModel.intercepts.collectAsState().value,
                     isInterceptionEnabled = uiState.isInterceptionEnabled,
@@ -330,7 +332,8 @@ fun NavigationDrawerContent(
             MenuItem(Screen.Intercepts, "Intercepts", Icons.Default.BugReport, interceptCount),
             MenuItem(Screen.Alerts, "Alerts", Icons.Default.Warning, alertCount),
             MenuItem(Screen.Rules, "Detection Rules", Icons.Default.Rule),
-            MenuItem(Screen.Export, "Export Data", Icons.Default.FileDownload)
+            MenuItem(Screen.Export, "Export Data", Icons.Default.FileDownload),
+            MenuItem(Screen.Debug, "Debug Info", Icons.Default.BugReport)
         )
         
         menuItems.forEach { item ->
@@ -384,6 +387,7 @@ fun getScreenTitle(screen: Screen): String {
         Screen.Alerts -> "⚠️ Alerts"
         Screen.Rules -> "🔐 Rules"
         Screen.Export -> "💾 Export"
+        Screen.Debug -> "🐞 Debug Info"
     }
 }
 

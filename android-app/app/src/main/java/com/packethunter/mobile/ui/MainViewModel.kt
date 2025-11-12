@@ -681,5 +681,6 @@ enum class Screen {
     Alerts,
     Rules,
     Export,
-    Intercepts
+    Intercepts,
+    Debug
 }
