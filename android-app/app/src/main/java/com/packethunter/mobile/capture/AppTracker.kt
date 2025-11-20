@@ -96,6 +96,25 @@ class AppTracker(private val context: Context) {
             // Ignore - will use TrafficStats instead
         }
         
+        // For VPN traffic, we can try to identify based on destination patterns
+        // This is a heuristic approach but better than nothing
+        try {
+            // If source is our VPN address, it's likely outbound traffic from an app
+            if (sourceIp == "10.0.0.2") {
+                // We can't directly identify the app, but we know it's outbound
+                // The TrafficStats approach in updateTrafficStats() will track it
+                return null // Let TrafficStats handle it
+            }
+            
+            // If destination is our VPN address, it's likely inbound traffic to an app
+            if (destIp == "10.0.0.2") {
+                // Inbound traffic - harder to identify source app
+                return null // Let TrafficStats handle it
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Heuristic app identification failed", e)
+        }
+        
         // Return null - TrafficStats will track via updateTrafficStats()
         return null
     }
@@ -198,6 +217,11 @@ class AppTracker(private val context: Context) {
                     continue
                 }
                 
+                // Skip if both TX and RX are 0
+                if (txBytes == 0L && rxBytes == 0L) {
+                    continue
+                }
+                
                 val stats = appStats.getOrPut(packageName) { AppStats() }
                 
                 // Calculate delta from previous snapshot
@@ -265,6 +289,7 @@ class AppTracker(private val context: Context) {
                 )
             }
             .sortedByDescending { it.totalBytes }
+            .take(50) // Limit to top 50 apps to avoid overwhelming the UI
     }
     
     /**

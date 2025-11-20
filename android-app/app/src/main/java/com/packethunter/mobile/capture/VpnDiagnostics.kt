@@ -1,5 +1,10 @@
 package com.packethunter.mobile.capture
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.LinkProperties
+import android.net.Network
+
 import android.net.VpnService
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -18,6 +23,19 @@ import java.net.InetAddress
  * - Packet forwarding
  */
 object VpnDiagnostics {
+    fun getSystemDnsServers(context: Context): List<java.net.InetAddress> {
+        return try {
+            val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val active: Network? = cm.activeNetwork
+            if (active != null) {
+                val lp: LinkProperties? = cm.getLinkProperties(active)
+                lp?.dnsServers ?: emptyList()
+            } else emptyList()
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get system DNS servers", e)
+            emptyList()
+        }
+    }
     private const val TAG = "VpnDiagnostics"
     
     /**

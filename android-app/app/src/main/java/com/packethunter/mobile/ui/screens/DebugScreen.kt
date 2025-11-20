@@ -20,6 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.packethunter.mobile.CrashHandler
 import com.packethunter.mobile.interception.AuditLogger
+import com.packethunter.mobile.ui.Screen
 import kotlinx.coroutines.launch
 import java.io.File
 

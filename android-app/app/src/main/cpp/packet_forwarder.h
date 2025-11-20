@@ -173,5 +173,8 @@ private:
     void cleanupConnections();
 };
 
+// Configuration: enable/disable legacy TCP response synthesis
+void setLegacyTcpResponseSynthesisEnabled(bool enabled);
+
 #endif // PACKET_FORWARDER_H
 

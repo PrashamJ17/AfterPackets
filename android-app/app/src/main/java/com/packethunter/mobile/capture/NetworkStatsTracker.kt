@@ -35,7 +35,7 @@ class NetworkStatsTracker(private val context: Context) {
     
     companion object {
         private const val TAG = "NetworkStatsTracker"
-        private const val QUERY_INTERVAL_MS = 2000L // Query every 2 seconds
+        private const val QUERY_INTERVAL_MS = 1000L // Query every 1 second for better responsiveness
     }
     
     data class AppUsageData(
@@ -175,46 +175,60 @@ class NetworkStatsTracker(private val context: Context) {
     
     /**
      * Update app statistics from NetworkStatsManager
-     * Should be called periodically (every 2-3 seconds)
+     * Should be called periodically (every 1-2 seconds)
      */
     suspend fun updateStats() {
         val currentTime = System.currentTimeMillis()
         val startTime = lastQueryTime
         val endTime = currentTime
-        
-        if (endTime - startTime < 1000) {
+    
+        // Reduced minimum interval for better responsiveness
+        if (endTime - startTime < 500) {
             // Don't query too frequently
             return
         }
         
-        val newStats = queryNetworkStats(startTime, endTime)
-        
-        // Merge new stats with existing
-        for ((packageName, newData) in newStats) {
-            val existing = appStats.getOrPut(packageName) { AppUsageData() }
+        try {
+            val newStats = queryNetworkStats(startTime, endTime)
             
-            // Calculate deltas (only add new traffic)
-            val deltaTx = (newData.sentBytes - existing.sentBytes).coerceAtLeast(0)
-            val deltaRx = (newData.receivedBytes - existing.receivedBytes).coerceAtLeast(0)
+            // Merge new stats with existing
+            for ((packageName, newData) in newStats) {
+                val existing = appStats.getOrPut(packageName) { AppUsageData() }
+                
+                // Calculate deltas (only add new traffic)
+                val deltaTx = (newData.sentBytes - existing.sentBytes).coerceAtLeast(0)
+                val deltaRx = (newData.receivedBytes - existing.receivedBytes).coerceAtLeast(0)
+                
+                // Only update if there's new traffic
+                if (deltaTx > 0 || deltaRx > 0) {
+                    existing.sentBytes += deltaTx
+                    existing.receivedBytes += deltaRx
+                    existing.sentPackets = newData.sentPackets
+                    existing.receivedPackets = newData.receivedPackets
+                    existing.lastUpdate = currentTime
+                }
+            }
             
-            existing.sentBytes += deltaTx
-            existing.receivedBytes += deltaRx
-            existing.sentPackets = newData.sentPackets
-            existing.receivedPackets = newData.receivedPackets
-            existing.lastUpdate = currentTime
+            // Remove apps that haven't been active recently (older than 30 seconds)
+            val cutoffTime = currentTime - 30000
+            appStats.entries.removeAll { it.value.lastUpdate < cutoffTime }
+            
+            lastQueryTime = currentTime
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating network stats", e)
+            // Don't update lastQueryTime on error so we retry sooner
         }
-        
-        // Remove apps that haven't been active recently (older than 30 seconds)
-        val cutoffTime = currentTime - 30000
-        appStats.entries.removeAll { it.value.lastUpdate < cutoffTime }
-        
-        lastQueryTime = currentTime
     }
     
     /**
      * Get all app talkers sorted by total data usage
      */
     fun getAppTalkers(): List<AppTalker> {
+        // Return empty list if no data to avoid UI issues
+        if (appStats.isEmpty()) {
+            return emptyList()
+        }
+        
         return appStats.map { (packageName, data) ->
             val appName = getAppName(packageName)
             
@@ -230,6 +244,7 @@ class NetworkStatsTracker(private val context: Context) {
                 protocols = emptySet() // NetworkStatsManager doesn't provide this
             )
         }.sortedByDescending { it.totalBytes }
+        .take(50) // Limit to top 50 apps to avoid overwhelming the UI
     }
     
     /**

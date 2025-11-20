@@ -2,33 +2,41 @@ ninja: Entering directory `/Users/prasham/Desktop/AfterPackets/android-app/app/.
 [1/4] Building CXX object CMakeFiles/packethunter.dir/packet_parser.cpp.o
 [2/4] Building CXX object CMakeFiles/packethunter.dir/native_interface.cpp.o
 [3/4] Building CXX object CMakeFiles/packethunter.dir/packet_forwarder.cpp.o
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:907:53: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
-                snprintf(buf, sizeof(buf), "%lu B", bytes);
-                                            ~~~     ^~~~~
-                                            %llu
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:925:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
-             stats.packetsRead,
-             ^~~~~~~~~~~~~~~~~
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:14:66: note: expanded from macro 'LOGI'
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:1101:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
+             currentStats.packetsRead,
+             ^~~~~~~~~~~~~~~~~~~~~~~~
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:15:66: note: expanded from macro 'LOGI'
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
                                                                  ^~~~~~~~~~~
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:927:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
-             stats.packetsForwarded,
-             ^~~~~~~~~~~~~~~~~~~~~~
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:14:66: note: expanded from macro 'LOGI'
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:1103:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
+             currentStats.packetsForwarded,
+             ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:15:66: note: expanded from macro 'LOGI'
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
                                                                  ^~~~~~~~~~~
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:931:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
-             stats.dnsQueries,
-             ^~~~~~~~~~~~~~~~
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:14:66: note: expanded from macro 'LOGI'
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:1105:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
+             currentStats.tcpConnections,
+             ^~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:15:66: note: expanded from macro 'LOGI'
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
                                                                  ^~~~~~~~~~~
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:932:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
-             stats.errors);
-             ^~~~~~~~~~~~
-/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:14:66: note: expanded from macro 'LOGI'
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:1106:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
+             currentStats.udpSessions,
+             ^~~~~~~~~~~~~~~~~~~~~~~~
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:15:66: note: expanded from macro 'LOGI'
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
                                                                  ^~~~~~~~~~~
-5 warnings generated.
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:1107:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
+             currentStats.dnsQueries,
+             ^~~~~~~~~~~~~~~~~~~~~~~
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:15:66: note: expanded from macro 'LOGI'
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+                                                                 ^~~~~~~~~~~
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:1108:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
+             currentStats.errors);
+             ^~~~~~~~~~~~~~~~~~~
+/Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:15:66: note: expanded from macro 'LOGI'
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+                                                                 ^~~~~~~~~~~
+6 warnings generated.
 [4/4] Linking CXX shared library /Users/prasham/Desktop/AfterPackets/android-app/app/build/intermediates/cxx/Debug/266a4i42/obj/armeabi-v7a/libpackethunter.so

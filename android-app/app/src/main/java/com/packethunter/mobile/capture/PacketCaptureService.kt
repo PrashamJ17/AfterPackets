@@ -82,6 +82,14 @@ class PacketCaptureService : VpnService() {
         // Initialize native parser
         nativeParser.initParser()
         
+        // Set app context for native interface
+        try {
+            NativeInterface.setAppContext(this)
+            Log.i(TAG, "✅ Native app context set successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Failed to set native app context", e)
+        }
+        
         // Initialize packet processor with NetworkStatsTracker
         val database = PacketDatabase.getDatabase(applicationContext)
         val appTracker = AppTracker(applicationContext)
@@ -111,6 +119,7 @@ class PacketCaptureService : VpnService() {
         Log.d(TAG, "Starting packet capture")
         
         // Initialize VpnSocketProtector with this service instance
+        // CRITICAL: This must be done BEFORE starting the native forwarder
         VpnSocketProtector.initialize(this)
         
         // Show notification
@@ -158,6 +167,8 @@ class PacketCaptureService : VpnService() {
             // Use ONLY the native forwarder (no Kotlin forwarder fallback)
             try {
                 nativeForwarder = NativeForwarder()
+                // Ensure legacy synthesis is disabled in production
+                nativeForwarder?.setLegacyTcpResponseSynthesisEnabled(false)
                 val started = nativeForwarder?.start(tunFd, this, packetProcessor)
 
                 if (started == true) {
@@ -233,24 +244,49 @@ class PacketCaptureService : VpnService() {
             Log.i(TAG, "=== VPN ESTABLISHMENT START ===")
             Log.i(TAG, "Establishing VPN: addr=10.0.0.2/32 route=0.0.0.0/0 dns=1.1.1.1,8.8.8.8 mtu=1400")
             
+            // Configuration flags
+            val routeAllTraffic = CaptureConfig.routeAllTraffic(this) // default false until tun2socks is integrated
             val builder = Builder()
                 .setSession("AFTERPACKETS")
                 .addAddress("10.0.0.2", 32) // Single host address
-                .addRoute("0.0.0.0", 0) // Route all traffic through VPN
-                .addDnsServer("1.1.1.1") // Cloudflare DNS (primary)
-                .addDnsServer("8.8.8.8") // Google DNS (fallback)
                 .setMtu(1400) // Optimized MTU to prevent fragmentation
+                .setBlocking(false) // Non-blocking is safer on some devices
+
+            // Add routes
+            if (routeAllTraffic) {
+                builder.addRoute("0.0.0.0", 0) // Route all traffic through VPN
+            } else {
+                // TEMP split tunnel: capture only RFC1918 to avoid breaking general connectivity
+                builder.addRoute("10.0.0.0", 8)
+                builder.addRoute("172.16.0.0", 12)
+                builder.addRoute("192.168.0.0", 16)
+            }
+
+            // Use system DNS servers instead of hard-coded ones
+            val systemDns = VpnDiagnostics.getSystemDnsServers(this)
+            if (systemDns.isNotEmpty()) {
+                systemDns.forEach { dns ->
+                    try { builder.addDnsServer(dns.hostAddress) } catch (_: Exception) {}
+                }
+            }
             
-            // Use blocking mode to ensure reliable packet capture
-            // Non-blocking mode can cause packets to be missed
-            // builder.setBlocking(false) // Disabled for reliability
-            
-            // Allow apps to bypass VPN if needed (Android 10+)
+            // CRITICAL: Allow apps to bypass VPN if needed (Android 10+)
+            // This prevents routing loops and allows other apps to work properly
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 builder.allowBypass()
                 Log.d(TAG, "allowBypass() enabled for Android 10+")
             }
             
+            // CRITICAL: Set configure intent to allow users to manage the VPN
+            val intent = Intent(this, MainActivity::class.java)
+            val pendingIntent = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+            builder.setConfigureIntent(pendingIntent)
+            
+            // If no system DNS was found, fall back to the default (do not set custom DNS)
+            if (systemDns.isEmpty()) {
+                Log.w(TAG, "No system DNS found; relying on platform defaults")
+            }
+
             Log.i(TAG, "Calling builder.establish()...")
             val vpnInterface = try {
                 builder.establish()

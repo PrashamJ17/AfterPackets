@@ -26,3 +26,6 @@
 
 # Keep data models
 -keep class com.packethunter.mobile.data.** { *; }
+
+# Keep VpnSocketProtector to prevent ClassNotFoundException
+-keep class com.packethunter.mobile.capture.VpnSocketProtector { *; }

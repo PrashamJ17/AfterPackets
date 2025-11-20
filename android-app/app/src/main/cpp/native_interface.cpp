@@ -1,4 +1,5 @@
 #include <jni.h>
+#include "tun2socks_bridge.h"
 #include <string>
 #include <vector>
 #include "packet_parser.h"
@@ -17,6 +18,53 @@ static jobject g_protectCallback = nullptr;
 static jmethodID g_protectMethod = nullptr;
 static jobject g_packetCallback = nullptr;
 static jmethodID g_packetProcessMethod = nullptr;
+static jobject g_appContext = nullptr; // Global reference to app context
+
+// JNI_OnLoad to store JavaVM
+jint JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_jvm = vm;
+    return JNI_VERSION_1_6;
+}
+
+// Helper to load class using app Context classloader
+jclass loadClassFromContext(JNIEnv* env, jobject context, const char* className) {
+    jclass contextClass = env->GetObjectClass(context);
+    jmethodID getClassLoader = env->GetMethodID(contextClass, "getClassLoader", "()Ljava/lang/ClassLoader;");
+    jobject classLoader = env->CallObjectMethod(context, getClassLoader);
+
+    jclass classLoaderClass = env->FindClass("java/lang/ClassLoader");
+    jmethodID loadClass = env->GetMethodID(classLoaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jstring jClassName = env->NewStringUTF(className);
+    jobject clsObj = env->CallObjectMethod(classLoader, loadClass, jClassName);
+    env->DeleteLocalRef(jClassName);
+
+    return (jclass) clsObj; // local ref
+}
+
+// Safe attach/detach helpers for native threads
+JNIEnv* attachCurrentThread() {
+    JNIEnv* env = nullptr;
+    if (g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        if (g_jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            return nullptr;
+        }
+    }
+    return env;
+}
+
+void detachCurrentThread() {
+    if (g_jvm) g_jvm->DetachCurrentThread();
+}
+
+// JNI function to set app context
+extern "C" JNIEXPORT void JNICALL
+Java_com_packethunter_mobile_capture_NativeInterface_setAppContext(JNIEnv* env, jclass clazz, jobject context) {
+    if (g_appContext != nullptr) {
+        env->DeleteGlobalRef(g_appContext);
+    }
+    g_appContext = env->NewGlobalRef(context);
+    LOGI("App context set for native interface");
+}
 
 extern "C" {
 
@@ -135,6 +183,16 @@ Java_com_packethunter_mobile_capture_NativePacketParser_parsePacket(
     return packetObj;
 }
 
+// Legacy TCP response synthesis toggle
+JNIEXPORT void JNICALL
+Java_com_packethunter_mobile_capture_NativeForwarder_setLegacyTcpResponseSynthesisEnabled(
+    JNIEnv* env,
+    jobject /* this */,
+    jboolean enabled
+) {
+    setLegacyTcpResponseSynthesisEnabled(enabled);
+}
+
 // Forwarder JNI methods
 JNIEXPORT jboolean JNICALL
 Java_com_packethunter_mobile_capture_NativeForwarder_startForwarderNative(
@@ -208,33 +266,84 @@ Java_com_packethunter_mobile_capture_NativeForwarder_startForwarderNative(
             return false;
         }
         
-        // Call VpnSocketProtector.protectFd(fd)
-        jclass protectorClass = env->FindClass("com/packethunter/mobile/capture/VpnSocketProtector");
+        // Call VpnSocketProtector.protectFd(fd) using robust class loading
+        LOGI("Checking app context for VpnSocketProtector");
+        if (g_appContext == nullptr) {
+            LOGE("App context not set for VpnSocketProtector - this is a critical error!");
+            if (getEnvStat == JNI_EDETACHED) {
+                g_jvm->DetachCurrentThread();
+            }
+            return false;
+        }
+
+        LOGI("Loading VpnSocketProtector class via app classloader");
+        JNIEnv* currentEnv = env; // Use the attached env
+        jclass protectorClass = loadClassFromContext(currentEnv, g_appContext, "com.packethunter.mobile.capture.VpnSocketProtector");
         if (protectorClass == nullptr) {
-            LOGE("Cannot find VpnSocketProtector class");
+            LOGE("Cannot find VpnSocketProtector class via app classloader - check if ProGuard is stripping the class");
             if (getEnvStat == JNI_EDETACHED) {
                 g_jvm->DetachCurrentThread();
             }
             return false;
         }
-        
-        jmethodID protectMethod = env->GetStaticMethodID(protectorClass, "protectFd", "(I)Z");
+
+        LOGI("Getting INSTANCE field from VpnSocketProtector");
+        // Get the INSTANCE field (Kotlin object)
+        jfieldID instanceField = currentEnv->GetStaticFieldID(protectorClass, "INSTANCE", "Lcom/packethunter/mobile/capture/VpnSocketProtector;");
+        if (instanceField == nullptr) {
+            LOGE("Cannot find VpnSocketProtector INSTANCE field - this indicates a Kotlin object issue");
+            currentEnv->DeleteLocalRef(protectorClass);
+            if (getEnvStat == JNI_EDETACHED) {
+                g_jvm->DetachCurrentThread();
+            }
+            return false;
+        }
+
+        jobject instanceObj = currentEnv->GetStaticObjectField(protectorClass, instanceField);
+        if (instanceObj == nullptr) {
+            LOGE("Cannot get VpnSocketProtector INSTANCE - this indicates the Kotlin object is not properly initialized");
+            currentEnv->DeleteLocalRef(protectorClass);
+            if (getEnvStat == JNI_EDETACHED) {
+                g_jvm->DetachCurrentThread();
+            }
+            return false;
+        }
+
+        LOGI("Getting protectFd method from VpnSocketProtector");
+        // Get the protect method - it's a static method in the Kotlin object
+        jmethodID protectMethod = currentEnv->GetStaticMethodID(protectorClass, "protectFd", "(I)Z");
         if (protectMethod == nullptr) {
-            LOGE("Cannot find protectFd method");
-            env->DeleteLocalRef(protectorClass);
+            LOGE("Cannot find protectFd method - check method signature and ProGuard rules");
+            currentEnv->DeleteLocalRef(protectorClass);
+            currentEnv->DeleteLocalRef(instanceObj);
             if (getEnvStat == JNI_EDETACHED) {
                 g_jvm->DetachCurrentThread();
             }
             return false;
         }
-        
-        jboolean result = env->CallStaticBooleanMethod(protectorClass, protectMethod, fd);
-        env->DeleteLocalRef(protectorClass);
-        
+
+        LOGI("Calling protectFd method on VpnSocketProtector with fd=%d", fd);
+        jboolean result = currentEnv->CallStaticBooleanMethod(protectorClass, protectMethod, fd);
+        currentEnv->DeleteLocalRef(protectorClass);
+        currentEnv->DeleteLocalRef(instanceObj);
+
+        // Check for Java exceptions
+        if (currentEnv->ExceptionCheck()) {
+            LOGE("Exception occurred while calling protectFd method");
+            currentEnv->ExceptionDescribe();
+            currentEnv->ExceptionClear();
+            if (getEnvStat == JNI_EDETACHED) {
+                g_jvm->DetachCurrentThread();
+            }
+            return false;
+        }
+
+        LOGI("protectFd returned: %s", result ? "true" : "false");
+
         if (getEnvStat == JNI_EDETACHED) {
             g_jvm->DetachCurrentThread();
         }
-        
+
         return result == JNI_TRUE;
     };
     

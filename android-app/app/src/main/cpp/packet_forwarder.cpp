@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>  // Add this for TCP_NODELAY
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -15,6 +16,10 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+
+// Feature flag: disable legacy TCP response synthesis by default (must be declared before use)
+static bool g_enableLegacyTcpResponseSynthesis = false;
+void setLegacyTcpResponseSynthesisEnabled(bool enabled) { g_enableLegacyTcpResponseSynthesis = enabled; }
 
 // Forward declarations
 static uint16_t calculateIpChecksum(const uint8_t* header, size_t len);
@@ -209,68 +214,83 @@ void PacketForwarder::handleTcpPacket(const uint8_t* ipHeader, size_t ipLen) {
     uint8_t protocol;
     uint16_t ipTotalLen = parseIpHeader(ipHeader, ipLen, &srcIp, &dstIp, &protocol);
     
-    if (ipTotalLen < 20 || ipLen < ipTotalLen) {
+    if (ipTotalLen < 40 || ipLen < ipTotalLen) { // IP header + TCP header
         return;
     }
     
-    // Parse TCP header
     uint8_t ihl = (ipHeader[0] & 0x0F) * 4;
-    if (ihl + 20 > ipLen) {
-        return;
-    }
-    
     const uint8_t* tcpHeader = ipHeader + ihl;
     uint16_t srcPort = (tcpHeader[0] << 8) | tcpHeader[1];
     uint16_t dstPort = (tcpHeader[2] << 8) | tcpHeader[3];
-    uint32_t seqNum = (tcpHeader[4] << 24) | (tcpHeader[5] << 16) | (tcpHeader[6] << 8) | tcpHeader[7];
-    uint32_t ackNum = (tcpHeader[8] << 24) | (tcpHeader[9] << 16) | (tcpHeader[10] << 8) | tcpHeader[11];
     
-    // Find or create TCP connection
+    // Skip packets to localhost - they should not be forwarded
+    if (dstIp == inet_addr("127.0.0.1") || srcIp == inet_addr("127.0.0.1")) {
+        LOGD("Skipping localhost packet: %s:%d -> %s:%d", 
+             inet_ntoa(*(struct in_addr*)&srcIp), srcPort,
+             inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
+        return;
+    }
+    
+    // PCAPdroid-style connection key for better lookup performance
+    ConnKey key = {srcIp, dstIp, srcPort, dstPort};
+    
     std::lock_guard<std::mutex> lock(m_connectionsMutex);
     
-    ConnKey key = {srcIp, dstIp, srcPort, dstPort};
+    // Check connection map for faster lookup
+    auto it = m_tcpConnMap.find(key);
     TcpConnection* conn = nullptr;
     
-    auto it = m_tcpConnMap.find(key);
     if (it != m_tcpConnMap.end()) {
-        conn = &m_tcpConnections[it->second];
-    } else {
-        // Create new connection
+        // Found existing connection
+        size_t index = it->second;
+        if (index < m_tcpConnections.size()) {
+            conn = &m_tcpConnections[index];
+        }
+    }
+    
+    if (!conn) {
+        // Create new connection - PCAPdroid approach with better error handling
         TcpConnection newConn;
         newConn.srcIp = srcIp;
         newConn.dstIp = dstIp;
         newConn.srcPort = srcPort;
         newConn.dstPort = dstPort;
-        newConn.seqNum = seqNum;
-        newConn.ackNum = ackNum;
         newConn.socketFd = createTcpSocket(dstIp, dstPort);
+        newConn.connected = false;
+        newConn.seqNum = 0;
+        newConn.ackNum = 0;
         newConn.lastActivity = std::chrono::steady_clock::now();
         
         if (newConn.socketFd >= 0) {
-            // Protect socket from VPN routing
+            // CRITICAL: Protect socket BEFORE connecting to prevent routing loops
+            // This is the key fix from PCAPdroid - proper socket protection timing
             if (m_protectCallback && !m_protectCallback(newConn.socketFd)) {
-                LOGE("Failed to protect TCP socket %d", newConn.socketFd);
+                LOGE("❌ Failed to protect TCP socket %d - closing", newConn.socketFd);
                 close(newConn.socketFd);
                 return;
             }
             
+            // Now connect after protection - PCAPdroid approach
             if (connectTcpSocket(newConn.socketFd, dstIp, dstPort)) {
                 newConn.connected = true;
-                size_t idx = m_tcpConnections.size();
+                
+                // Add to connection vector and map for faster lookup
+                size_t index = m_tcpConnections.size();
                 m_tcpConnections.push_back(newConn);
-                m_tcpConnMap[key] = idx;
-                conn = &m_tcpConnections[idx];
+                m_tcpConnMap[key] = index;
+                conn = &m_tcpConnections.back();
                 
                 {
                     std::lock_guard<std::mutex> statsLock(m_statsMutex);
                     m_stats.tcpConnections++;
                 }
-                
-                LOGI("✅ TCP connection: %s:%d -> %s:%d (fd=%d)",
+                LOGD("✅ New TCP connection established: %s:%d -> %s:%d", 
                      inet_ntoa(*(struct in_addr*)&srcIp), srcPort,
-                     inet_ntoa(*(struct in_addr*)&dstIp), dstPort, newConn.socketFd);
+                     inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
             } else {
-                LOGE("❌ TCP connect failed: %s:%d", inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
+                LOGE("❌ Failed to connect TCP socket %d to %s:%d", 
+                     newConn.socketFd,
+                     inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
                 close(newConn.socketFd);
                 return;
             }
@@ -282,18 +302,55 @@ void PacketForwarder::handleTcpPacket(const uint8_t* ipHeader, size_t ipLen) {
     if (conn && conn->connected && conn->socketFd >= 0) {
         conn->lastActivity = std::chrono::steady_clock::now();
         
-        // Forward TCP data
+        const uint8_t* tcpData = tcpHeader + ((tcpHeader[12] >> 4) * 4); // TCP data offset
         size_t tcpDataLen = ipTotalLen - ihl - ((tcpHeader[12] >> 4) * 4);
+        
         if (tcpDataLen > 0) {
-            const uint8_t* tcpData = tcpHeader + ((tcpHeader[12] >> 4) * 4);
+            // PCAPdroid-style send with proper error handling
             ssize_t sent = send(conn->socketFd, tcpData, tcpDataLen, MSG_NOSIGNAL);
             if (sent > 0) {
                 std::lock_guard<std::mutex> statsLock(m_statsMutex);
                 m_stats.packetsForwarded++;
                 m_stats.bytesForwarded += sent;
-                LOGD("➡️ TCP sent %zd bytes to %s:%d", sent, inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
+                LOGD("➡️ TCP sent %zd bytes to %s:%d", sent, 
+                     inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
             } else if (sent < 0) {
-                LOGE("❌ TCP send failed: %s", strerror(errno));
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    LOGE("❌ TCP send failed: %s", strerror(errno));
+                    // Mark connection as disconnected
+                    conn->connected = false;
+                }
+            }
+        }
+        
+        // PCAPdroid-style response handling with proper polling
+        // Use poll instead of recv with MSG_DONTWAIT for better performance
+        struct pollfd pfd;
+        pfd.fd = conn->socketFd;
+        pfd.events = POLLIN | POLLPRI;
+        pfd.revents = 0;
+        
+        int poll_result = poll(&pfd, 1, 0); // Non-blocking poll
+        if (poll_result > 0 && (pfd.revents & (POLLIN | POLLPRI))) {
+            uint8_t responseBuffer[8192]; // Larger buffer for better performance
+            ssize_t received = recv(conn->socketFd, responseBuffer, sizeof(responseBuffer), MSG_DONTWAIT);
+            if (received > 0) {
+                LOGD("⬅️ Received %zd bytes TCP response from %s:%d", received,
+                     inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
+
+                // Write response back to TUN only if legacy synthesis is enabled (lab mode)
+                if (g_enableLegacyTcpResponseSynthesis) {
+                    writeTcpResponseToTun(m_tunFd, dstIp, srcIp, dstPort, srcPort,
+                                          responseBuffer, received);
+                }
+
+                std::lock_guard<std::mutex> statsLock(m_statsMutex);
+                m_stats.packetsForwarded++;
+                m_stats.bytesForwarded += received;
+            } else if (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                LOGE("❌ TCP recv error: %s", strerror(errno));
+                // Mark connection as disconnected on error
+                conn->connected = false;
             }
         }
     }
@@ -314,7 +371,15 @@ void PacketForwarder::handleUdpPacket(const uint8_t* ipHeader, size_t ipLen) {
     uint16_t dstPort = (udpHeader[2] << 8) | udpHeader[3];
     uint16_t udpLen = (udpHeader[4] << 8) | udpHeader[5];
     
-    // Check if DNS (port 53)
+    // Skip packets to localhost - they should not be forwarded
+    if (dstIp == inet_addr("127.0.0.1") || srcIp == inet_addr("127.0.0.1")) {
+        LOGD("Skipping localhost UDP packet: %s:%d -> %s:%d", 
+             inet_ntoa(*(struct in_addr*)&srcIp), srcPort,
+             inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
+        return;
+    }
+    
+    // Check if DNS (port 53) - PCAPdroid-style special handling
     if (dstPort == 53 || srcPort == 53) {
         {
             std::lock_guard<std::mutex> lock(m_statsMutex);
@@ -324,71 +389,118 @@ void PacketForwarder::handleUdpPacket(const uint8_t* ipHeader, size_t ipLen) {
         return;
     }
     
-    // Handle other UDP
+    // Handle other UDP - PCAPdroid approach with connection map
+    ConnKey key = {srcIp, dstIp, srcPort, dstPort};
+    
     std::lock_guard<std::mutex> lock(m_connectionsMutex);
     
+    // Check session map for faster lookup
+    auto it = m_udpSessionMap.find(key);
     UdpSession* session = nullptr;
-    for (auto& s : m_udpSessions) {
-        if (s.srcIp == srcIp && s.dstIp == dstIp &&
-            s.srcPort == srcPort && s.dstPort == dstPort) {
-            session = &s;
-            break;
+    
+    if (it != m_udpSessionMap.end()) {
+        // Found existing session
+        size_t index = it->second;
+        if (index < m_udpSessions.size()) {
+            session = &m_udpSessions[index];
         }
     }
     
     if (!session) {
+        // Create new session - PCAPdroid approach
         UdpSession newSession;
         newSession.srcIp = srcIp;
         newSession.dstIp = dstIp;
         newSession.srcPort = srcPort;
         newSession.dstPort = dstPort;
         newSession.socketFd = createUdpSocket();
+        newSession.lastActivity = std::chrono::steady_clock::now();
         
         if (newSession.socketFd >= 0) {
+            // CRITICAL: Protect socket BEFORE using to prevent routing loops
+            // This is the key fix from PCAPdroid - proper socket protection timing
             if (m_protectCallback && !m_protectCallback(newSession.socketFd)) {
-                LOGE("Failed to protect UDP socket %d", newSession.socketFd);
+                LOGE("❌ Failed to protect UDP socket %d - closing", newSession.socketFd);
                 close(newSession.socketFd);
                 return;
             }
             
+            // Add to session vector and map for faster lookup
+            size_t index = m_udpSessions.size();
             m_udpSessions.push_back(newSession);
+            m_udpSessionMap[key] = index;
             session = &m_udpSessions.back();
             
             {
                 std::lock_guard<std::mutex> statsLock(m_statsMutex);
                 m_stats.udpSessions++;
             }
+            LOGD("✅ New UDP session established: %s:%d -> %s:%d", 
+                 inet_ntoa(*(struct in_addr*)&srcIp), srcPort,
+                 inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
         } else {
             return;
         }
     }
     
     if (session && session->socketFd >= 0) {
+        session->lastActivity = std::chrono::steady_clock::now();
+        
         const uint8_t* udpData = udpHeader + 8;
         size_t udpDataLen = udpLen - 8;
         
-        if (sendUdpPacket(session->socketFd, udpData, udpDataLen, dstIp, dstPort)) {
-            std::lock_guard<std::mutex> statsLock(m_statsMutex);
-            m_stats.packetsForwarded++;
-            m_stats.bytesForwarded += udpDataLen;
+        if (udpDataLen > 0) {
+            // PCAPdroid-style send with proper error handling
+            struct sockaddr_in addr;
+            memset(&addr, 0, sizeof(addr));
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(dstPort);
+            addr.sin_addr.s_addr = dstIp;
+            
+            ssize_t sent = sendto(session->socketFd, udpData, udpDataLen, 
+                                 0, (struct sockaddr*)&addr, sizeof(addr));
+            if (sent > 0) {
+                std::lock_guard<std::mutex> statsLock(m_statsMutex);
+                m_stats.packetsForwarded++;
+                m_stats.bytesForwarded += sent;
+                LOGD("➡️ UDP sent %zd bytes to %s:%d", sent, 
+                     inet_ntoa(*(struct in_addr*)&dstIp), dstPort);
+            } else if (sent < 0) {
+                if (errno != EAGAIN && errno != EWOULDBLOCK) {
+                    LOGE("❌ UDP sendto failed: %s", strerror(errno));
+                }
+            }
         }
         
-        // Read response
-        uint8_t responseBuffer[4096];
-        struct sockaddr_in serverAddr;
-        socklen_t addrLen = sizeof(serverAddr);
-        ssize_t received = recvfrom(session->socketFd, responseBuffer, sizeof(responseBuffer),
-                                    MSG_DONTWAIT, (struct sockaddr*)&serverAddr, &addrLen);
-        if (received > 0) {
-            LOGD("Received %zd bytes UDP response", received);
+        // PCAPdroid-style response handling with proper polling
+        struct pollfd pfd;
+        pfd.fd = session->socketFd;
+        pfd.events = POLLIN | POLLPRI;
+        pfd.revents = 0;
+        
+        int poll_result = poll(&pfd, 1, 0); // Non-blocking poll
+        if (poll_result > 0 && (pfd.revents & (POLLIN | POLLPRI))) {
+            uint8_t responseBuffer[8192];
+            struct sockaddr_in responseAddr;
+            socklen_t addrLen = sizeof(responseAddr);
+            
+            ssize_t received = recvfrom(session->socketFd, responseBuffer, sizeof(responseBuffer), 
+                                       MSG_DONTWAIT, (struct sockaddr*)&responseAddr, &addrLen);
+            if (received > 0) {
+                LOGD("⬅️ Received %zd bytes UDP response from %s:%d", received,
+                     inet_ntoa(responseAddr.sin_addr), ntohs(responseAddr.sin_port));
 
-            // Write response back to TUN
-            writeUdpResponseToTun(m_tunFd, dstIp, srcIp, dstPort, srcPort,
-                                  responseBuffer, received);
+                // Write response back to TUN using PCAPdroid-style approach
+                writeUdpResponseToTun(m_tunFd, responseAddr.sin_addr.s_addr, srcIp, 
+                                     ntohs(responseAddr.sin_port), srcPort,
+                                     responseBuffer, received);
 
-            std::lock_guard<std::mutex> statsLock(m_statsMutex);
-            m_stats.packetsForwarded++;
-            m_stats.bytesForwarded += received;
+                std::lock_guard<std::mutex> statsLock(m_statsMutex);
+                m_stats.packetsForwarded++;
+                m_stats.bytesForwarded += received;
+            } else if (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+                LOGE("❌ UDP recvfrom error: %s", strerror(errno));
+            }
         }
     }
 }
@@ -483,23 +595,51 @@ bool PacketForwarder::connectTcpSocket(int fd, uint32_t dstIp, uint16_t dstPort)
     addr.sin_port = htons(dstPort);
     addr.sin_addr.s_addr = dstIp;
     
+    // CRITICAL: Set socket options BEFORE connecting
+    // Enable keepalive for long-lived connections
+    int keepalive = 1;
+    setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive));
+    
+    // Set TCP_NODELAY to disable Nagle's algorithm for better responsiveness
+    int nodelay = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+    
     int result = connect(fd, (struct sockaddr*)&addr, sizeof(addr));
     if (result < 0 && errno != EINPROGRESS) {
         LOGE("TCP connect failed: %s", strerror(errno));
         return false;
     }
     
-    // Wait for connection (simplified - should use select/poll)
-    usleep(10000); // 10ms
-    
-    // Check if connected
-    int error = 0;
-    socklen_t len = sizeof(error);
-    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
-        return true;
+    // Use proper select/poll for connection instead of usleep
+    if (errno == EINPROGRESS) {
+        fd_set write_fds;
+        FD_ZERO(&write_fds);
+        FD_SET(fd, &write_fds);
+        
+        struct timeval timeout;
+        timeout.tv_sec = 5;  // 5 second timeout
+        timeout.tv_usec = 0;
+        
+        int select_result = select(fd + 1, NULL, &write_fds, NULL, &timeout);
+        if (select_result <= 0) {
+            LOGE("TCP connect timeout or error: %s", strerror(errno));
+            return false;
+        }
+        
+        // Check if connection was successful
+        int error = 0;
+        socklen_t len = sizeof(error);
+        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
+            LOGD("✅ TCP connection established via select");
+            return true;
+        } else {
+            LOGE("TCP connect failed after select: %s", strerror(error));
+            return false;
+        }
     }
     
-    return false;
+    LOGD("✅ TCP connection established immediately");
+    return true;
 }
 
 bool PacketForwarder::sendUdpPacket(int fd, const uint8_t* data, size_t len,
@@ -710,22 +850,68 @@ static void writeTcpResponseToTun(int tunFd, uint32_t srcIp, uint32_t dstIp,
 void PacketForwarder::cleanupConnections() {
     std::lock_guard<std::mutex> lock(m_connectionsMutex);
     
-    for (auto& conn : m_tcpConnections) {
-        if (conn.socketFd >= 0) {
-            close(conn.socketFd);
+    auto now = std::chrono::steady_clock::now();
+    auto tcpTimeout = std::chrono::seconds(30);  // 30 second timeout
+    auto udpTimeout = std::chrono::seconds(30);  // 30 second timeout
+    
+    // Clean up stale TCP connections
+    auto tcpIt = m_tcpConnections.begin();
+    while (tcpIt != m_tcpConnections.end()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - tcpIt->lastActivity);
+        if (elapsed > tcpTimeout || !tcpIt->connected) {
+            if (tcpIt->socketFd >= 0) {
+                close(tcpIt->socketFd);
+                LOGD("Closed stale TCP connection: %s:%d -> %s:%d", 
+                     inet_ntoa(*(struct in_addr*)&tcpIt->srcIp), tcpIt->srcPort,
+                     inet_ntoa(*(struct in_addr*)&tcpIt->dstIp), tcpIt->dstPort);
+            }
+            tcpIt = m_tcpConnections.erase(tcpIt);
+        } else {
+            ++tcpIt;
         }
     }
     
-    for (auto& session : m_udpSessions) {
-        if (session.socketFd >= 0) {
-            close(session.socketFd);
+    // Clean up stale UDP sessions
+    auto udpIt = m_udpSessions.begin();
+    while (udpIt != m_udpSessions.end()) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - udpIt->lastActivity);
+        if (elapsed > udpTimeout) {
+            if (udpIt->socketFd >= 0) {
+                close(udpIt->socketFd);
+                LOGD("Closed stale UDP session: %s:%d -> %s:%d", 
+                     inet_ntoa(*(struct in_addr*)&udpIt->srcIp), udpIt->srcPort,
+                     inet_ntoa(*(struct in_addr*)&udpIt->dstIp), udpIt->dstPort);
+            }
+            udpIt = m_udpSessions.erase(udpIt);
+        } else {
+            ++udpIt;
         }
     }
     
-    m_tcpConnections.clear();
-    m_udpSessions.clear();
+    // Clear connection maps
     m_tcpConnMap.clear();
     m_udpSessionMap.clear();
+    
+    // Rebuild connection maps for faster lookup
+    for (size_t i = 0; i < m_tcpConnections.size(); i++) {
+        ConnKey key = {
+            m_tcpConnections[i].srcIp,
+            m_tcpConnections[i].dstIp,
+            m_tcpConnections[i].srcPort,
+            m_tcpConnections[i].dstPort
+        };
+        m_tcpConnMap[key] = i;
+    }
+    
+    for (size_t i = 0; i < m_udpSessions.size(); i++) {
+        ConnKey key = {
+            m_udpSessions[i].srcIp,
+            m_udpSessions[i].dstIp,
+            m_udpSessions[i].srcPort,
+            m_udpSessions[i].dstPort
+        };
+        m_udpSessionMap[key] = i;
+    }
 }
 
 // TCP response handler loop
@@ -778,10 +964,12 @@ void PacketForwarder::tcpResponseLoop() {
                          inet_ntoa(*(struct in_addr*)&conn->dstIp),
                          conn->dstPort);
                     
-                    // Write response back to TUN
-                    writeTcpResponseToTun(m_tunFd, conn->dstIp, conn->srcIp, 
-                                         conn->dstPort, conn->srcPort,
-                                         responseBuffer, received);
+                    // Write response back to TUN only if legacy synthesis is enabled (lab mode)
+                    if (g_enableLegacyTcpResponseSynthesis) {
+                        writeTcpResponseToTun(m_tunFd, conn->dstIp, conn->srcIp, 
+                                             conn->dstPort, conn->srcPort,
+                                             responseBuffer, received);
+                    }
                     
                     std::lock_guard<std::mutex> statsLock(m_statsMutex);
                     m_stats.packetsForwarded++;
@@ -877,62 +1065,58 @@ void PacketForwarder::udpResponseLoop() {
 
 // Stats monitor loop - logs stats every 5 seconds
 void PacketForwarder::statsMonitorLoop() {
-    LOGI("Stats monitor started - will log every 5 seconds");
+    LOGI("Stats monitor loop started");
     
     while (m_running.load()) {
         std::this_thread::sleep_for(std::chrono::seconds(5));
         
-        if (!m_running.load()) {
-            break;
-        }
-        
-        Stats stats;
-        size_t tcpCount, udpCount;
-        
+        // Get and log stats
+        Stats currentStats;
         {
             std::lock_guard<std::mutex> lock(m_statsMutex);
-            stats = m_stats;
+            currentStats = m_stats;
         }
         
-        {
-            std::lock_guard<std::mutex> lock(m_connectionsMutex);
-            tcpCount = m_tcpConnections.size();
-            udpCount = m_udpSessions.size();
-        }
-        
-        // Format bytes nicely
+        // Format bytes for human readable output
         auto formatBytes = [](uint64_t bytes) -> std::string {
-            char buf[64];
-            if (bytes < 1024) {
-                snprintf(buf, sizeof(buf), "%lu B", bytes);
-            } else if (bytes < 1024 * 1024) {
-                snprintf(buf, sizeof(buf), "%.2f KB", bytes / 1024.0);
-            } else if (bytes < 1024 * 1024 * 1024) {
-                snprintf(buf, sizeof(buf), "%.2f MB", bytes / (1024.0 * 1024.0));
-            } else {
-                snprintf(buf, sizeof(buf), "%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0));
+            const char* units[] = {"B", "KB", "MB", "GB"};
+            int unitIndex = 0;
+            double value = static_cast<double>(bytes);
+            
+            while (value >= 1024.0 && unitIndex < 3) {
+                value /= 1024.0;
+                unitIndex++;
             }
-            return std::string(buf);
+            
+            char buffer[32];
+            if (unitIndex == 0) {
+                snprintf(buffer, sizeof(buffer), "%.0f %s", value, units[unitIndex]);
+            } else {
+                snprintf(buffer, sizeof(buffer), "%.2f %s", value, units[unitIndex]);
+            }
+            return std::string(buffer);
         };
         
-        LOGI("✅ FORWARDER ALIVE ✅ | "
-             "IN: %lu pkts (%s) | "
-             "OUT: %lu pkts (%s) | "
-             "TCP: %zu conns | "
-             "UDP: %zu sessions | "
-             "DNS: %lu queries | "
-             "Errors: %lu",
-             stats.packetsRead,
-             formatBytes(stats.bytesRead).c_str(),
-             stats.packetsForwarded,
-             formatBytes(stats.bytesForwarded).c_str(),
-             tcpCount,
-             udpCount,
-             stats.dnsQueries,
-             stats.errors);
+        LOGI("✅ FORWARDER ALIVE ✅ | IN: %lu pkts (%s) | OUT: %lu pkts (%s) | TCP: %lu conns | UDP: %lu sessions | DNS: %lu queries | Errors: %lu",
+             currentStats.packetsRead,
+             formatBytes(currentStats.bytesRead).c_str(),
+             currentStats.packetsForwarded,
+             formatBytes(currentStats.bytesForwarded).c_str(),
+             currentStats.tcpConnections,
+             currentStats.udpSessions,
+             currentStats.dnsQueries,
+             currentStats.errors);
+        
+        // Periodic cleanup of stale connections (every 30 seconds)
+        static int cleanupCounter = 0;
+        cleanupCounter++;
+        if (cleanupCounter >= 6) { // 6 * 5 seconds = 30 seconds
+            cleanupConnections();
+            cleanupCounter = 0;
+        }
     }
     
-    LOGI("Stats monitor ended");
+    LOGI("Stats monitor loop ended");
 }
 
 // Pause/resume session for interception

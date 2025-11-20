@@ -229,7 +229,15 @@ class PacketProcessor(
     private fun createPacketInfo(parsed: ParsedPacketData): PacketInfo {
         // Determine direction based on source IP
         // VPN address is 10.0.0.2, packets FROM this are outbound, TO this are inbound
-        val direction = if (parsed.sourceIp == "10.0.0.2") "inbound" else "outbound"
+        // Also check for loopback addresses (127.0.0.1) which are typically inbound
+        val direction = when {
+            parsed.sourceIp == "10.0.0.2" -> "outbound"
+            parsed.destIp == "10.0.0.2" -> "inbound"
+            parsed.destIp == "127.0.0.1" -> "inbound"
+            parsed.sourceIp == "127.0.0.1" -> "outbound"
+            else -> "outbound" // Default to outbound for external traffic
+        }
+        
         return PacketInfo(
             timestamp = System.currentTimeMillis(),
             protocol = parsed.protocol,
@@ -257,8 +265,15 @@ class PacketProcessor(
      */
     fun createPacketInfoForBreakpoint(parsed: ParsedPacketData): PacketInfo? {
         return try {
-            // Determine direction
-            val direction = if (parsed.sourceIp == "10.0.0.2") "inbound" else "outbound"
+            // Determine direction based on source/dest IP
+            // VPN address is 10.0.0.2, packets FROM this are outbound, TO this are inbound
+            val direction = when {
+                parsed.sourceIp == "10.0.0.2" -> "outbound"
+                parsed.destIp == "10.0.0.2" -> "inbound"
+                parsed.destIp == "127.0.0.1" -> "inbound"
+                parsed.sourceIp == "127.0.0.1" -> "outbound"
+                else -> "outbound" // Default to outbound for external traffic
+            }
             
             PacketInfo(
                 timestamp = System.currentTimeMillis(),

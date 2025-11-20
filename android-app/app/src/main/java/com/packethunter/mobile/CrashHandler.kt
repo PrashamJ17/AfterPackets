@@ -70,12 +70,11 @@ class CrashHandler private constructor(private val context: Context) : Thread.Un
             // Build crash entry
             val timestamp = dateFormat.format(Date())
             val crashEntry = buildString {
+                // Create separator using string concatenation
                 append("\n")
-                append("="repeat(80))
-                append("\n")
+                append("================================================================================\n")
                 append("CRASH REPORT - $timestamp\n")
-                append("="repeat(80))
-                append("\n")
+                append("================================================================================\n")
                 append("Thread: ${thread.name}\n")
                 append("Exception: ${throwable.javaClass.name}\n")
                 append("Message: ${throwable.message ?: "No message"}\n")

@@ -100,6 +100,7 @@ class NativeForwarder {
     }
     
     private external fun startForwarderNative(tunFd: Int, protector: Any, packetCallback: Any): Boolean
+    external fun setLegacyTcpResponseSynthesisEnabled(enabled: Boolean)
     
     /**
      * Stop the forwarder

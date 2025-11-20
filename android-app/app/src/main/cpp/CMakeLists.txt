@@ -11,6 +11,7 @@ add_library(packethunter SHARED
     packet_parser.cpp
     native_interface.cpp
     packet_forwarder.cpp
+    tun2socks_bridge.cpp
 )
 
 # Find libraries

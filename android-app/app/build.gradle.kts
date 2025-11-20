@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.google.devtools.ksp")
+    kotlin("kapt") // required for annotation processors
 }
 
 android {
@@ -34,6 +35,9 @@ android {
             )
             signingConfig = signingConfigs.getByName("debug") // Replace with release signing
         }
+        debug {
+            isMinifyEnabled = false
+        }
     }
 
     compileOptions {
@@ -62,6 +66,9 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/NOTICE"
+            excludes += "META-INF/LICENSE"
         }
     }
 
@@ -73,6 +80,8 @@ android {
     }
     
     ndkVersion = "25.2.9519653"
+    
+    sourceSets["main"].java.srcDirs("src/main/java")
 }
 
 dependencies {
