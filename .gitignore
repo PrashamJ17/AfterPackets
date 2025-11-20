@@ -1,0 +1,32 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.android/
+.idea/
+.vscode/
+
+# Gradle
+.gradle/
+**/build/
+
+# NDK intermediate
+android-app/app/.cxx/
+
+# APKs and bundles
+*.apk
+*.aab
+
+# Logs
+*.log
+
+# Misc
+*.iml
+local.properties
+
+# Node
+node_modules/
+
+# Vendor archives (keep extracted sources only)
+android-app/app/src/main/cpp/vendor/*.zip
