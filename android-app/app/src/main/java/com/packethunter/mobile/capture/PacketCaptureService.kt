@@ -244,23 +244,16 @@ class PacketCaptureService : VpnService() {
             Log.i(TAG, "=== VPN ESTABLISHMENT START ===")
             Log.i(TAG, "Establishing VPN: addr=10.0.0.2/32 route=0.0.0.0/0 dns=1.1.1.1,8.8.8.8 mtu=1400")
             
-            // Configuration flags
-            val routeAllTraffic = CaptureConfig.routeAllTraffic(this) // default false until tun2socks is integrated
+            // Configuration flags - NOW ENABLED with proper tun2socks
+            val routeAllTraffic = true // ENABLED: lwip_tun2socks can handle full routing
             val builder = Builder()
                 .setSession("AFTERPACKETS")
                 .addAddress("10.0.0.2", 32) // Single host address
                 .setMtu(1400) // Optimized MTU to prevent fragmentation
                 .setBlocking(false) // Non-blocking is safer on some devices
 
-            // Add routes
-            if (routeAllTraffic) {
-                builder.addRoute("0.0.0.0", 0) // Route all traffic through VPN
-            } else {
-                // TEMP split tunnel: capture only RFC1918 to avoid breaking general connectivity
-                builder.addRoute("10.0.0.0", 8)
-                builder.addRoute("172.16.0.0", 12)
-                builder.addRoute("192.168.0.0", 16)
-            }
+            // Add routes - FULL ROUTING with proper tun2socks
+            builder.addRoute("0.0.0.0", 0) // Route all traffic through VPN
 
             // Use system DNS servers instead of hard-coded ones
             val systemDns = VpnDiagnostics.getSystemDnsServers(this)

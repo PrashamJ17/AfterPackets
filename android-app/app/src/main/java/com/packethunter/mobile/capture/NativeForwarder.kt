@@ -53,6 +53,7 @@ class NativeForwarder {
      * @return true if started successfully
      */
     fun start(tunFd: Int, vpnService: VpnService, packetProcessor: PacketProcessor): Boolean {
+        Log.i(TAG, "Starting NativeForwarder with lwip_tun2socks integration")
         val protector = object : SocketProtector {
             override fun protect(socketFd: Int): Boolean {
                 val result = vpnService.protect(socketFd)

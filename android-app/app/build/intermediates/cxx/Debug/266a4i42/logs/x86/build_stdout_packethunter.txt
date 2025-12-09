@@ -1,7 +1,9 @@
 ninja: Entering directory `/Users/prasham/Desktop/AfterPackets/android-app/app/.cxx/Debug/266a4i42/x86'
-[1/4] Building CXX object CMakeFiles/packethunter.dir/packet_parser.cpp.o
-[2/4] Building CXX object CMakeFiles/packethunter.dir/native_interface.cpp.o
-[3/4] Building CXX object CMakeFiles/packethunter.dir/packet_forwarder.cpp.o
+[1/6] Building CXX object CMakeFiles/packethunter.dir/tun2socks_bridge.cpp.o
+[2/6] Building C object CMakeFiles/packethunter.dir/lwip_tun2socks.c.o
+[3/6] Building CXX object CMakeFiles/packethunter.dir/packet_parser.cpp.o
+[4/6] Building CXX object CMakeFiles/packethunter.dir/native_interface.cpp.o
+[5/6] Building CXX object CMakeFiles/packethunter.dir/packet_forwarder.cpp.o
 /Users/prasham/Desktop/AfterPackets/android-app/app/src/main/cpp/packet_forwarder.cpp:1101:14: warning: format specifies type 'unsigned long' but the argument has type 'uint64_t' (aka 'unsigned long long') [-Wformat]
              currentStats.packetsRead,
              ^~~~~~~~~~~~~~~~~~~~~~~~
@@ -39,4 +41,4 @@ ninja: Entering directory `/Users/prasham/Desktop/AfterPackets/android-app/app/.
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
                                                                  ^~~~~~~~~~~
 6 warnings generated.
-[4/4] Linking CXX shared library /Users/prasham/Desktop/AfterPackets/android-app/app/build/intermediates/cxx/Debug/266a4i42/obj/x86/libpackethunter.so
+[6/6] Linking CXX shared library /Users/prasham/Desktop/AfterPackets/android-app/app/build/intermediates/cxx/Debug/266a4i42/obj/x86/libpackethunter.so

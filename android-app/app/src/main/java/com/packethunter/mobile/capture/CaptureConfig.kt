@@ -2,11 +2,11 @@ package com.packethunter.mobile.capture
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.preference.PreferenceManager
 
 object CaptureConfig {
     private const val KEY_ROUTE_ALL = "route_all_traffic"
     private const val KEY_USE_SYSTEM_DNS = "use_system_dns"
+    private const val PREFS_NAME = "afterpackets_capture_config"
 
     fun routeAllTraffic(context: Context): Boolean {
         val prefs = prefs(context)
@@ -27,5 +27,5 @@ object CaptureConfig {
     }
 
     private fun prefs(context: Context): SharedPreferences =
-        PreferenceManager.getDefaultSharedPreferences(context.applicationContext)
+        context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 }
