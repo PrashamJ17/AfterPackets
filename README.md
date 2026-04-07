@@ -234,7 +234,7 @@ This project is licensed under the MIT License - see LICENSE file for details.
 **Project**: AFTERPACKETS  
 **Version**: 1.0.0  
 **Platform**: Android 8.0+ | Web (Modern Browsers)  
-**Repository**: [GitHub Link]  
-**Issues**: [Issues Page]
+**Repository**: https://github.com/PrashamJ17/AfterPackets  
+**Issues**: ----
 
 ---
